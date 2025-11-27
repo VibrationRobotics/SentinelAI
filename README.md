@@ -1,63 +1,132 @@
-# SentinelAI: Autonomous AI-Powered Threat Detection & Prevention
+# SentinelAI
 
-An intelligent cybersecurity system that provides **real-time threat detection, analysis, and autonomous response** for Windows systems. Combines a Docker-based dashboard with a native Windows agent for complete protection.
+<div align="center">
 
-## 🛡️ Key Features
+![SentinelAI Logo](https://img.shields.io/badge/SentinelAI-Autonomous%20Threat%20Detection-blue?style=for-the-badge&logo=shield)
+
+**Autonomous AI-Powered Threat Detection & Prevention System**
+
+[![License](https://img.shields.io/badge/License-Dual%20(Personal%20Free%20%7C%20Commercial%20Paid)-green?style=flat-square)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square&logo=python)](https://python.org)
+[![Docker](https://img.shields.io/badge/Docker-Ready-blue?style=flat-square&logo=docker)](https://docker.com)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey?style=flat-square)]()
+
+[Features](#-features) • [Quick Start](#-quick-start) • [Documentation](#-documentation) • [API](#-api-reference) • [License](#-license)
+
+</div>
+
+---
+
+## 🛡️ Overview
+
+SentinelAI is an intelligent cybersecurity system that provides **real-time threat detection, AI-powered analysis, and autonomous response** across Windows, Linux, and macOS. It combines a Docker-based dashboard with native agents for complete endpoint protection.
+
+### Why SentinelAI?
+
+- **AI-Powered Analysis**: GPT-4 integration for intelligent threat classification
+- **Cross-Platform**: Native agents for Windows, Linux, and macOS
+- **Real-Time Protection**: Continuous monitoring with instant threat response
+- **Beautiful Dashboard**: Modern web UI with live threat visualization
+- **Easy Deployment**: Docker-based dashboard with simple agent setup
+
+---
+
+## ✨ Features
 
 ### Core Protection
-- **Windows Agent**: Native Windows monitoring for processes, network, and event logs
-- **Auto-Response System**: Automatically blocks malicious IPs and terminates suspicious processes
-- **Real-Time Dashboard**: Beautiful web UI showing all threats and system status
-- **AI-Driven Analysis**: Machine learning threat classification and response generation
+| Feature | Description |
+|---------|-------------|
+| **Native Agents** | Windows, Linux, and macOS agents for real endpoint protection |
+| **AI Analysis** | GPT-4 powered threat classification and recommendations |
+| **Auto-Response** | Automatically block IPs and terminate malicious processes |
+| **Real-Time Dashboard** | Beautiful web UI with live threat maps and charts |
 
 ### Monitoring Capabilities
-- **Process Monitor**: Detects mimikatz, encoded PowerShell, attack tools
-- **Network Monitor**: Identifies port scans, brute force, reverse shells
-- **File Scanner**: YARA rules, hash checking, quarantine capabilities
-- **Log Aggregation**: Windows Event Logs, SSH logs, syslog parsing
-- **Windows Firewall**: Native firewall control via netsh
+| Monitor | Capabilities |
+|---------|-------------|
+| **Process Monitor** | Detects mimikatz, encoded PowerShell, reverse shells, crypto miners |
+| **Network Monitor** | Identifies port scans, brute force, DDoS, suspicious connections |
+| **File Scanner** | YARA rules, hash checking, VirusTotal integration, quarantine |
+| **Log Aggregation** | Windows Event Logs, auth.log, syslog, custom sources |
+| **Firewall Control** | Windows Firewall (netsh), iptables (Linux), pf (macOS) |
 
 ### Integrations
-- **Azure AI Services**: OpenAI, Anomaly Detector, Content Safety, AI Search
-- **Snort IDS**: Ingest alerts from Snort intrusion detection
-- **Docker Projects**: Connect any Docker container for monitoring
-- **REST API**: Full API for custom integrations
+| Integration | Description |
+|-------------|-------------|
+| **OpenAI GPT-4** | Intelligent threat analysis and remediation suggestions |
+| **Snort IDS** | Ingest alerts from Snort intrusion detection system |
+| **Docker Projects** | Connect any Docker container for centralized monitoring |
+| **REST API** | Full API for custom integrations and automation |
 
-## 🚀 Quick Start (Recommended)
+---
+
+## 🚀 Quick Start
 
 ### Step 1: Start the Dashboard (Docker)
 
-```powershell
-# Clone and start
+```bash
+git clone https://github.com/VibrationRobotics/SentinelAI.git
 cd SentinelAI
 docker-compose up -d
 ```
 
 Dashboard available at: **http://localhost:8015**
 
-### Step 2: Run the Windows Agent (Native)
+### Step 2: Run an Agent
+
+<details>
+<summary><b>🪟 Windows Agent</b></summary>
 
 ```powershell
 # Open PowerShell as Administrator
 cd SentinelAI\windows_agent
-
-# Create virtual environment (first time only)
-python -m venv venv
-.\venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run the agent
-python agent.py
+.\run_agent.bat
 ```
 
-The agent will:
-- ✅ Monitor all Windows processes for threats
-- ✅ Watch network connections for suspicious activity
-- ✅ Parse Windows Security Event Logs
-- ✅ Report everything to the Docker dashboard
-- ✅ Block malicious IPs via Windows Firewall
+Or manually:
+```powershell
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+python agent.py --dashboard http://localhost:8015
+```
+</details>
+
+<details>
+<summary><b>🐧 Linux Agent</b></summary>
+
+```bash
+cd SentinelAI/linux_agent
+chmod +x run_agent.sh
+sudo ./run_agent.sh
+```
+
+Or manually:
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+sudo python3 agent.py --dashboard http://localhost:8015
+```
+</details>
+
+<details>
+<summary><b>🍎 macOS Agent</b></summary>
+
+```bash
+cd SentinelAI/linux_agent
+chmod +x run_agent.sh
+sudo ./run_agent.sh
+```
+
+Or manually:
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+sudo python3 agent.py --dashboard http://localhost:8015
+```
+</details>
 
 ---
 
@@ -65,53 +134,50 @@ The agent will:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        YOUR WINDOWS PC                          │
-│                                                                  │
-│  ┌──────────────────────┐      ┌──────────────────────────────┐ │
-│  │   Windows Agent      │      │      Docker Desktop          │ │
-│  │   (Native Python)    │      │  ┌────────────────────────┐  │ │
-│  │                      │ HTTP │  │   SentinelAI Dashboard │  │ │
-│  │ • Process Monitor    │─────►│  │   (FastAPI + Web UI)   │  │ │
-│  │ • Network Monitor    │      │  │                        │  │ │
-│  │ • Event Log Parser   │      │  │ • AI Threat Analysis   │  │ │
-│  │ • Firewall Control   │      │  │ • Auto-Response        │  │ │
-│  │                      │      │  │ • Visualization        │  │ │
-│  └──────────────────────┘      │  └────────────────────────┘  │ │
-│           ▲                    │             ▲                 │ │
-│           │                    │             │                 │ │
-│    Monitors YOUR PC            │    Can connect to OTHER       │ │
-│    (processes, network,        │    Docker projects too!       │ │
-│     files, event logs)         │                               │ │
-│                                └──────────────────────────────┘ │
+│                     SentinelAI Dashboard                         │
+│                    (Docker - port 8015)                          │
+│  ┌─────────────┬─────────────┬─────────────┬──────────────────┐ │
+│  │  FastAPI    │  PostgreSQL │    Redis    │     Web UI       │ │
+│  │  Backend    │  Database   │    Cache    │   Dashboard      │ │
+│  └─────────────┴─────────────┴─────────────┴──────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
+                               │
+             ┌─────────────────┼─────────────────┐
+             ▼                 ▼                 ▼
+┌───────────────────┐ ┌───────────────┐ ┌───────────────────┐
+│   Windows Agent   │ │  Linux Agent  │ │   macOS Agent     │
+│   (run_agent.bat) │ │ (run_agent.sh)│ │  (run_agent.sh)   │
+├───────────────────┤ ├───────────────┤ ├───────────────────┤
+│ • Process Monitor │ │ • Process Mon │ │ • Process Monitor │
+│ • Network Monitor │ │ • Network Mon │ │ • Network Monitor │
+│ • Event Log Parse │ │ • Auth Log    │ │ • System Log      │
+│ • Windows Firewal │ │ • iptables    │ │ • pf firewall     │
+│ • AI Analysis     │ │ • AI Analysis │ │ • AI Analysis     │
+└───────────────────┘ └───────────────┘ └───────────────────┘
 ```
 
 ---
 
 ## 🔗 Connecting Other Docker Projects
 
-SentinelAI can receive threat data from ANY Docker container. Add this to your other project's code:
+SentinelAI can receive threat data from ANY Docker container:
 
 ```python
 import requests
 
-# Send threat to SentinelAI
 requests.post("http://host.docker.internal:8015/api/v1/threats/analyze", json={
     "source_ip": "192.168.1.100",
     "threat_type": "suspicious_activity",
     "severity": "HIGH",
-    "description": "Unusual database query pattern detected",
-    "payload": '{"query": "SELECT * FROM users"}'
+    "description": "Unusual database query pattern detected"
 })
 ```
 
-Or from docker-compose, add SentinelAI to your network:
+Or add to your docker-compose.yml:
 
 ```yaml
-# In your other project's docker-compose.yml
 services:
   your-app:
-    # ... your config ...
     environment:
       - SENTINEL_API=http://host.docker.internal:8015/api/v1
     extra_hosts:
@@ -120,289 +186,215 @@ services:
 
 ---
 
-## 🖥️ Full Setup Options
-
-### Option A: Docker Dashboard + Windows Agent (Recommended)
-
-Best for: **Full Windows PC protection**
-
-```powershell
-# 1. Start Dashboard
-docker-compose up -d
-
-# 2. Run Windows Agent (as Admin)
-cd windows_agent
-python -m venv venv
-.\venv\Scripts\activate
-pip install -r requirements.txt
-python agent.py
-```
-
-### Option B: Docker Only (Testing/Development)
-
-Best for: **Testing the dashboard, no Windows protection**
-
-```powershell
-docker-compose up -d
-# Dashboard at http://localhost:8015
-# Only monitors Docker container, NOT your Windows PC
-```
-
-### Option C: Fully Native (No Docker)
-
-Best for: **Maximum Windows integration**
-
-```powershell
-# Create venv in main directory
-python -m venv venv
-.\venv\Scripts\activate
-pip install -r requirements.txt
-
-# Start the server
-uvicorn app.main:app --host 0.0.0.0 --port 8015
-
-# In another terminal, run the agent
-cd windows_agent
-python agent.py --dashboard http://localhost:8015
-```
-
----
-
-## 📋 Setup Details
+## 📋 Documentation
 
 ### Prerequisites
 - **Python 3.10+**
 - **Docker Desktop** (for dashboard)
-- **Administrator rights** (for Windows Agent firewall control)
+- **Administrator/root rights** (for agent firewall control)
 
-### Docker Deployment
+### Environment Configuration
 
-```powershell
-# Build and start
+Copy `.env.example` to `.env` and configure:
+
+```bash
+cp .env.example .env
+```
+
+Key variables:
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OPENAI_API_KEY` | OpenAI API key for GPT-4 analysis | Required |
+| `DATABASE_URL` | PostgreSQL connection string | Auto-configured |
+| `REDIS_URL` | Redis connection string | Auto-configured |
+| `DASHBOARD_PORT` | Dashboard port | `8015` |
+
+### Docker Commands
+
+```bash
+# Start all services
 docker-compose up -d
-
-# Check status
-docker-compose ps
 
 # View logs
 docker-compose logs -f web
 
-# Stop
+# Rebuild after changes
+docker-compose up -d --build web
+
+# Stop all services
 docker-compose down
 ```
 
-### Using Snort Connector with Docker
+### Agent Command Line Options
 
-The Snort connector is included as a separate service in the Docker Compose configuration. It automatically monitors the `/app/snort_logs/alert` file inside the container, which is mapped to the `./snort_logs/alert` file in your project directory.
-
-1. Start the Snort connector service:
 ```bash
-docker-compose up -d snort-connector
+# Windows
+python agent.py --dashboard URL --verbose --no-ai
+
+# Linux/macOS
+python3 agent.py --dashboard URL --verbose --no-ai
+
+Options:
+  -d, --dashboard URL    Dashboard URL (default: http://localhost:8015)
+  -v, --verbose          Enable verbose logging
+  --no-ai                Disable AI analysis (heuristics only)
 ```
 
-2. View Snort connector logs:
-```bash
-docker-compose logs -f snort-connector
-```
+---
 
-3. Test with sample alerts:
-Add Snort-formatted alerts to the `./snort_logs/alert` file to trigger the connector. The connector will automatically detect changes and send the alerts to the CyberCare API.
+## 📡 API Reference
 
-4. Configure the connector:
-You can customize the connector behavior by editing the environment variables in the `docker-compose.yml` file:
-```yaml
-environment:
-  - SNORT_LOG_PATH=/app/snort_logs/alert
-  - API_URL=http://web:8000/api/v1/threats/analyze
-  - POLL_INTERVAL=5
-  # Uncomment to enable batch mode
-  # - BATCH_MODE=--batch --batch-size 10
-  # Database configuration
-  # - DB_PATH=/app/data/snort_threats.db
-  # - RETRY_UNSENT=true
-  # - RETRY_INTERVAL=60
-  # - RETRY_LIMIT=3
-```
+Base URL: `http://localhost:8015`
 
-## API Documentation
-
-Once the application is running, you can access the interactive API documentation at:
-- Swagger UI: `http://localhost:8005/docs`
-- ReDoc: `http://localhost:8005/redoc`
-
-### Key Endpoints
-
-#### Health Check
-```
+### Health Check
+```http
 GET /api/v1/health
 ```
-Returns the health status of the application.
 
-#### Authentication
-```
-POST /api/v1/auth/login
-```
-Authenticate and get an access token.
-
-```
-POST /api/v1/auth/register
-```
-Register a new user.
-
-```
-GET /api/v1/auth/me
-```
-Get current user information.
-
-#### Threat Analysis
-```
+### Threat Analysis
+```http
 POST /api/v1/threats/analyze
-```
-Analyze a single security threat.
+Content-Type: application/json
 
+{
+    "source_ip": "192.168.1.100",
+    "threat_type": "malware",
+    "severity": "HIGH",
+    "description": "Suspicious process detected"
+}
 ```
-POST /api/v1/threats/batch-analyze
-```
-Analyze multiple security threats in background.
 
-```
-GET /api/v1/threats/status/{job_id}
-```
-Check the status of a batch analysis job.
-
-```
+### Get Recent Threats
+```http
 GET /api/v1/threats/recent
 ```
-Get recent analyzed threats.
 
-## Monitoring & Simulation Tools
+### Agent Registration
+```http
+POST /api/v1/windows/agent/register
+Content-Type: application/json
 
-CyberCare comes with built-in tools for threat monitoring and simulation, perfect for testing and demonstrations.
-
-### Threat Simulator
-
-The threat simulator generates synthetic security events to test the system's detection and response capabilities.
-
-```bash
-# Generate a single threat
-python tools/threat_simulator.py --url http://localhost:8005/api/v1/threats/analyze
-
-# Generate a batch of threats
-python tools/threat_simulator.py --batch --batch-url http://localhost:8005/api/v1/threats/batch-analyze --batch-size 5
-
-# Run continuous simulation
-python tools/threat_simulator.py --continuous --min-interval 5 --max-interval 15 --duration 60
+{
+    "hostname": "DESKTOP-ABC123",
+    "platform": "Windows",
+    "platform_version": "10.0.19041",
+    "capabilities": ["process", "network", "eventlog", "firewall"]
+}
 ```
 
-### Snort IDS Connector
-
-The Snort connector monitors Snort IDS alert logs and forwards detected threats to the CyberCare API.
-
-```bash
-# Monitor a Snort alert log file using polling
-python tools/snort_connector.py --log-path /path/to/snort/alert --api-url http://localhost:8005/api/v1/threats/analyze --poll-interval 5
-
-# Use file system monitoring (more efficient)
-python tools/snort_connector.py --log-path /path/to/snort/alert --api-url http://localhost:8005/api/v1/threats/analyze --watch
-
-# Process alerts in batch mode
-python tools/snort_connector.py --log-path /path/to/snort/alert --api-url http://localhost:8005/api/v1/threats/analyze --batch-mode --batch-size 10
-
-# Enable Azure AI integration for enhanced threat analysis
-python tools/snort_connector.py --log-path /path/to/snort/alert --api-url http://localhost:8005/api/v1/threats/analyze --use-ai
-
-# Specify custom database path for persistent storage
-python tools/snort_connector.py --log-path /path/to/snort/alert --db-path /path/to/custom/database.db
-
-# Configure retry for unsent alerts
-python tools/snort_connector.py --log-path /path/to/snort/alert --retry-unsent --retry-interval 60 --retry-limit 3
+### List Connected Agents
+```http
+GET /api/v1/windows/agent/list
 ```
 
-## Environment Variables
+Full API documentation available at:
+- **Swagger UI**: http://localhost:8015/docs
+- **ReDoc**: http://localhost:8015/redoc
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql+asyncpg://postgres:postgres@db:5432/cybercare` |
-| `REDIS_URL` | Redis connection string | `redis://redis:6379/0` |
-| `SECRET_KEY` | JWT secret key | `changeme` |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | Token expiration time | `30` |
-| `LOG_LEVEL` | Logging level | `INFO` |
-| `LOG_FILE` | Log file path | `app.log` |
-| `USE_AZURE_AI` | Enable Azure AI services | `False` |
-| `AZURE_OPENAI_ENDPOINT` | Azure OpenAI service endpoint | - |
-| `AZURE_OPENAI_KEY` | Azure OpenAI API key | - |
-| `AZURE_OPENAI_DEPLOYMENT_ID` | Azure OpenAI deployment ID | - |
-| `AZURE_ANOMALY_DETECTOR_ENDPOINT` | Azure Anomaly Detector endpoint | - |
-| `AZURE_ANOMALY_DETECTOR_KEY` | Azure Anomaly Detector API key | - |
-| `AZURE_CONTENT_SAFETY_ENDPOINT` | Azure Content Safety endpoint | - |
-| `AZURE_CONTENT_SAFETY_KEY` | Azure Content Safety API key | - |
-| `AZURE_SEARCH_ENDPOINT` | Azure AI Search endpoint | - |
-| `AZURE_SEARCH_KEY` | Azure AI Search API key | - |
-| `AZURE_SEARCH_INDEX_NAME` | Azure AI Search index name | - |
-| `AZURE_METRICS_ADVISOR_ENDPOINT` | Azure Metrics Advisor endpoint | - |
-| `AZURE_METRICS_ADVISOR_SUBSCRIPTION_KEY` | Azure Metrics Advisor subscription key | - |
-| `AZURE_METRICS_ADVISOR_API_KEY` | Azure Metrics Advisor API key | - |
+---
 
-## Project Structure
+## 📁 Project Structure
 
 ```
-cybercare/
+SentinelAI/
 ├── app/
-│   ├── api/
-│   │   ├── deps.py             # Dependency injection
-│   │   └── endpoints/
-│   │       ├── auth.py         # Authentication endpoints
-│   │       ├── threats.py      # Threat analysis endpoints
-│   │       ├── incidents.py    # Incident management
-│   │       └── analysis.py     # Analytics and reporting
-│   ├── core/
-│   │   ├── config.py           # Application configuration
-│   │   └── security.py         # Security utilities
-│   ├── db/
-│   │   ├── base.py             # Database connection
-│   │   └── models.py           # SQLAlchemy models
-│   ├── models/
-│   │   ├── ai/
-│   │   │   ├── threat_classifier.py  # AI threat classification
-│   │   │   └── azure/          # Azure AI services integration
-│   │   │       ├── openai_service.py        # Azure OpenAI integration
-│   │   │       ├── anomaly_detector.py      # Azure Anomaly Detector
-│   │   │       ├── content_safety.py        # Azure Content Safety
-│   │   │       ├── search_service.py        # Azure AI Search
-│   │   │       ├── metrics_advisor.py       # Azure Metrics Advisor
-│   │   │       └── ai_service_manager.py    # Unified AI service manager
-│   │   └── domain/
-│   │       ├── user.py         # User domain models
-│   │       └── threat.py       # Threat domain models
-│   ├── services/
-│   │   ├── threat_detection.py # Threat detection service
-│   │   └── response_automation.py  # Automated response
-│   └── main.py                 # Application entry point
-├── tests/
-│   ├── conftest.py             # Test fixtures
-│   ├── test_auth.py            # Authentication tests
-│   └── test_threats.py         # Threat analysis tests
-├── alembic/                    # Database migrations
+│   ├── api/endpoints/          # API endpoints
+│   │   ├── threats.py          # Threat analysis
+│   │   ├── windows.py          # Windows/Agent APIs
+│   │   ├── monitoring.py       # Monitoring status
+│   │   ├── auto_response.py    # Auto-response config
+│   │   └── logs.py             # Log collection
+│   ├── services/               # Core services
+│   │   ├── openai_service.py   # GPT-4 integration
+│   │   ├── network_monitor.py  # Network monitoring
+│   │   ├── process_monitor.py  # Process monitoring
+│   │   ├── file_scanner.py     # File scanning
+│   │   ├── log_collector.py    # Log aggregation
+│   │   └── auto_response_service.py
+│   ├── static/                 # Frontend assets
+│   │   ├── index.html          # Dashboard UI
+│   │   ├── js/                 # JavaScript
+│   │   └── css/                # Stylesheets
+│   └── main.py                 # Application entry
+├── windows_agent/              # Windows agent
+│   ├── agent.py                # Agent script
+│   ├── run_agent.bat           # Windows startup
+│   └── requirements.txt
+├── linux_agent/                # Linux/macOS agent
+│   ├── agent.py                # Agent script
+│   ├── run_agent.sh            # Unix startup
+│   └── requirements.txt
 ├── docker-compose.yml          # Docker configuration
-├── Dockerfile                  # Docker build instructions
-├── .env.example                # Environment variables template
+├── Dockerfile                  # Docker build
+├── .env.example                # Environment template
 ├── requirements.txt            # Python dependencies
-└── README.md                   # Project documentation
+└── README.md                   # This file
 ```
 
-## Version History
+---
 
-- **0.2.0** - Azure AI Integration
-  - Added Azure OpenAI, Anomaly Detector, Content Safety, AI Search, and Metrics Advisor
-  - Enhanced Snort connector with AI capabilities
-  - Expanded database schema for AI analysis
-  - Improved logging and error handling
-- **0.1.0** - Initial release with core functionality
-  - AI-powered threat detection
-  - Basic authentication
-  - Threat analysis API
-  - Docker containerization
+## 📜 Version History
 
-## License
+### v1.0.0 (November 2025) - Native Agents Release
+- ✨ Native Windows Agent with AI-powered detection
+- ✨ Native Linux/macOS Agent with auth log monitoring
+- ✨ Connected Agents dashboard section
+- ✨ Agent heartbeat and auto-reconnection
+- ✨ Two-stage detection (heuristics + AI)
+- ✨ Process whitelist configuration
+- 🔧 GPT-4 integration for threat analysis
+- 🔧 Real-time threat map with geolocation
+- 🔧 Auto-response system with IP blocking
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+### v0.2.0 (October 2025) - Dashboard Enhancement
+- ✨ Real-time monitoring dashboard
+- ✨ Network monitor with DDoS detection
+- ✨ File scanner with YARA rules
+- ✨ Process monitor with behavior analysis
+- ✨ Log aggregation from multiple sources
+- 🔧 Snort IDS integration
+- 🔧 Docker-based deployment
+
+### v0.1.0 (September 2025) - Initial Release
+- ✨ Core threat analysis API
+- ✨ AI-powered threat classification
+- ✨ Docker containerization
+- ✨ Basic web dashboard
+
+---
+
+## 📄 License
+
+### Dual License
+
+**Personal/Non-Commercial Use**: FREE
+- Use SentinelAI for personal projects, learning, and non-commercial purposes at no cost.
+
+**Commercial Use**: Paid License Required
+- For commercial use, enterprise deployment, or integration into commercial products, please contact us for licensing options.
+
+Contact: [Create an issue](https://github.com/VibrationRobotics/SentinelAI/issues) for licensing inquiries.
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+---
+
+## ⭐ Support
+
+If you find SentinelAI useful, please consider giving it a star on GitHub!
+
+<div align="center">
+
+**Made with ❤️ by [VibrationRobotics](https://github.com/VibrationRobotics)**
+
+</div>

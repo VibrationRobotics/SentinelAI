@@ -1,0 +1,59 @@
+# SentinelAI Dual License
+
+Copyright (c) 2025 VibrationRobotics
+
+## Personal/Non-Commercial Use License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to use,
+copy, modify, and distribute the Software for personal, educational, and
+non-commercial purposes, subject to the following conditions:
+
+1. The above copyright notice and this permission notice shall be included in
+   all copies or substantial portions of the Software.
+
+2. The Software may not be used for commercial purposes without obtaining a
+   commercial license.
+
+3. "Commercial purposes" includes, but is not limited to:
+   - Using the Software in a commercial product or service
+   - Using the Software to provide services to third parties for compensation
+   - Using the Software in a business environment for profit-generating activities
+   - Selling, licensing, or distributing the Software for a fee
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+## Commercial License
+
+For commercial use of SentinelAI, a separate commercial license is required.
+
+Commercial licenses include:
+- Right to use in commercial products and services
+- Priority support
+- Custom feature development
+- Enterprise deployment assistance
+
+To obtain a commercial license, please contact:
+- GitHub: https://github.com/VibrationRobotics/SentinelAI/issues
+- Create an issue with the subject "Commercial License Inquiry"
+
+## Summary
+
+| Use Case | License Required |
+|----------|------------------|
+| Personal projects | Free (this license) |
+| Learning/Education | Free (this license) |
+| Open source projects | Free (this license) |
+| Internal business use | Commercial license |
+| Commercial products | Commercial license |
+| SaaS/Services | Commercial license |
+
+---
+
+For questions about licensing, please open an issue on GitHub.
