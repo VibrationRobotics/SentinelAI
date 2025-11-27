@@ -1,10 +1,11 @@
-version: '3.8'
-
 services:
   web:
     build: .
     ports:
-      - "8005:8000"
+      - "8015:8000"
+    # Required for iptables firewall commands
+    cap_add:
+      - NET_ADMIN
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/cybercare
       - REDIS_URL=redis://redis:6379/0
@@ -12,8 +13,19 @@ services:
       - DEBUG=True
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_API_BASE_URL=${OPENAI_API_BASE_URL:-https://api.openai.com/v1}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - ENABLE_REAL_EXECUTION=${ENABLE_REAL_EXECUTION:-true}
+      - REMEDIATION_DRY_RUN=${REMEDIATION_DRY_RUN:-false}
+      - REMEDIATION_LOG_DIR=/var/log/sentinelai
+      - AUTO_RESPONSE_ENABLED=${AUTO_RESPONSE_ENABLED:-true}
+      - AUTO_RESPONSE_THRESHOLD=${AUTO_RESPONSE_THRESHOLD:-HIGH}
+      - AUTO_BLOCK_IPS=${AUTO_BLOCK_IPS:-true}
+      - AUTO_RESPONSE_COOLDOWN=${AUTO_RESPONSE_COOLDOWN:-5}
+      - AUTO_RESPONSE_DRY_RUN=${AUTO_RESPONSE_DRY_RUN:-false}
+      - AUTO_RESPONSE_WHITELIST=${AUTO_RESPONSE_WHITELIST:-127.0.0.1}
     volumes:
       - .:/app
+      - sentinelai_logs:/var/log/sentinelai
     depends_on:
       db:
         condition: service_healthy
@@ -35,7 +47,7 @@ services:
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=cybercare
     ports:
-      - "5434:5432"
+      - "5444:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -47,7 +59,7 @@ services:
   redis:
     image: redis:alpine
     ports:
-      - "6380:6379"
+      - "6390:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -81,3 +93,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  sentinelai_logs:

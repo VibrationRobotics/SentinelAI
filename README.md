@@ -1,80 +1,193 @@
-# CyberCare: AI-Powered Cyber Responder
+# SentinelAI: Autonomous AI-Powered Threat Detection & Prevention
 
-An intelligent cybersecurity response system that leverages AI to detect, analyze, and respond to security threats in real-time.
+An intelligent cybersecurity system that provides **real-time threat detection, analysis, and autonomous response** for Windows systems. Combines a Docker-based dashboard with a native Windows agent for complete protection.
 
-## Features
+## 🛡️ Key Features
 
-- **AI-Driven Threat Analysis**: Utilizes machine learning to identify and classify potential security threats
-- **Automated Response Mechanisms**: Configurable automated responses to common threat patterns
-- **Threat Prioritization & Triage**: Intelligent sorting of threats by severity and confidence
-- **Adaptive Learning**: System improves over time based on feedback and outcomes
-- **Real-Time API & Dashboard**: Comprehensive API for integration with existing security tools
-- **Persistent Storage**: Threats are stored in a SQLite database for historical analysis and tracking
-  - Ability to track submission status of threats
-  - Statistics and reporting on threat patterns
-  - Retry mechanism for failed API submissions
-  - Database-backed reliability even during service disruptions
-- **Azure AI Integration**: Enhanced threat analysis using Azure AI services
-  - OpenAI for threat classification and response generation
-  - Anomaly Detector for identifying unusual behavior
-  - Content Safety for scanning URLs and text
-  - AI Search for threat intelligence
-  - Metrics Advisor for system performance monitoring
+### Core Protection
+- **Windows Agent**: Native Windows monitoring for processes, network, and event logs
+- **Auto-Response System**: Automatically blocks malicious IPs and terminates suspicious processes
+- **Real-Time Dashboard**: Beautiful web UI showing all threats and system status
+- **AI-Driven Analysis**: Machine learning threat classification and response generation
 
-## Setup
+### Monitoring Capabilities
+- **Process Monitor**: Detects mimikatz, encoded PowerShell, attack tools
+- **Network Monitor**: Identifies port scans, brute force, reverse shells
+- **File Scanner**: YARA rules, hash checking, quarantine capabilities
+- **Log Aggregation**: Windows Event Logs, SSH logs, syslog parsing
+- **Windows Firewall**: Native firewall control via netsh
 
-### Local Development
+### Integrations
+- **Azure AI Services**: OpenAI, Anomaly Detector, Content Safety, AI Search
+- **Snort IDS**: Ingest alerts from Snort intrusion detection
+- **Docker Projects**: Connect any Docker container for monitoring
+- **REST API**: Full API for custom integrations
 
-1. Create virtual environment:
-```bash
-python -m venv venv
-```
+## 🚀 Quick Start (Recommended)
 
-2. Activate virtual environment:
-- Windows:
-```bash
-.\venv\Scripts\activate
-```
-- Unix/MacOS:
-```bash
-source venv/bin/activate
-```
+### Step 1: Start the Dashboard (Docker)
 
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-4. Set up environment variables:
-```bash
-cp .env.example .env
-# Edit .env with your configuration
-```
-
-5. Run the application:
-```bash
-uvicorn app.main:app --reload --port 8000
-```
-
-### Docker Deployment
-
-1. Build and start the containers:
-```bash
+```powershell
+# Clone and start
+cd SentinelAI
 docker-compose up -d
 ```
 
-2. Check container status:
-```bash
+Dashboard available at: **http://localhost:8015**
+
+### Step 2: Run the Windows Agent (Native)
+
+```powershell
+# Open PowerShell as Administrator
+cd SentinelAI\windows_agent
+
+# Create virtual environment (first time only)
+python -m venv venv
+.\venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the agent
+python agent.py
+```
+
+The agent will:
+- ✅ Monitor all Windows processes for threats
+- ✅ Watch network connections for suspicious activity
+- ✅ Parse Windows Security Event Logs
+- ✅ Report everything to the Docker dashboard
+- ✅ Block malicious IPs via Windows Firewall
+
+---
+
+## 📦 Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        YOUR WINDOWS PC                          │
+│                                                                  │
+│  ┌──────────────────────┐      ┌──────────────────────────────┐ │
+│  │   Windows Agent      │      │      Docker Desktop          │ │
+│  │   (Native Python)    │      │  ┌────────────────────────┐  │ │
+│  │                      │ HTTP │  │   SentinelAI Dashboard │  │ │
+│  │ • Process Monitor    │─────►│  │   (FastAPI + Web UI)   │  │ │
+│  │ • Network Monitor    │      │  │                        │  │ │
+│  │ • Event Log Parser   │      │  │ • AI Threat Analysis   │  │ │
+│  │ • Firewall Control   │      │  │ • Auto-Response        │  │ │
+│  │                      │      │  │ • Visualization        │  │ │
+│  └──────────────────────┘      │  └────────────────────────┘  │ │
+│           ▲                    │             ▲                 │ │
+│           │                    │             │                 │ │
+│    Monitors YOUR PC            │    Can connect to OTHER       │ │
+│    (processes, network,        │    Docker projects too!       │ │
+│     files, event logs)         │                               │ │
+│                                └──────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 🔗 Connecting Other Docker Projects
+
+SentinelAI can receive threat data from ANY Docker container. Add this to your other project's code:
+
+```python
+import requests
+
+# Send threat to SentinelAI
+requests.post("http://host.docker.internal:8015/api/v1/threats/analyze", json={
+    "source_ip": "192.168.1.100",
+    "threat_type": "suspicious_activity",
+    "severity": "HIGH",
+    "description": "Unusual database query pattern detected",
+    "payload": '{"query": "SELECT * FROM users"}'
+})
+```
+
+Or from docker-compose, add SentinelAI to your network:
+
+```yaml
+# In your other project's docker-compose.yml
+services:
+  your-app:
+    # ... your config ...
+    environment:
+      - SENTINEL_API=http://host.docker.internal:8015/api/v1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+```
+
+---
+
+## 🖥️ Full Setup Options
+
+### Option A: Docker Dashboard + Windows Agent (Recommended)
+
+Best for: **Full Windows PC protection**
+
+```powershell
+# 1. Start Dashboard
+docker-compose up -d
+
+# 2. Run Windows Agent (as Admin)
+cd windows_agent
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+python agent.py
+```
+
+### Option B: Docker Only (Testing/Development)
+
+Best for: **Testing the dashboard, no Windows protection**
+
+```powershell
+docker-compose up -d
+# Dashboard at http://localhost:8015
+# Only monitors Docker container, NOT your Windows PC
+```
+
+### Option C: Fully Native (No Docker)
+
+Best for: **Maximum Windows integration**
+
+```powershell
+# Create venv in main directory
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+
+# Start the server
+uvicorn app.main:app --host 0.0.0.0 --port 8015
+
+# In another terminal, run the agent
+cd windows_agent
+python agent.py --dashboard http://localhost:8015
+```
+
+---
+
+## 📋 Setup Details
+
+### Prerequisites
+- **Python 3.10+**
+- **Docker Desktop** (for dashboard)
+- **Administrator rights** (for Windows Agent firewall control)
+
+### Docker Deployment
+
+```powershell
+# Build and start
+docker-compose up -d
+
+# Check status
 docker-compose ps
-```
 
-3. View logs:
-```bash
+# View logs
 docker-compose logs -f web
-```
 
-4. Stop the containers:
-```bash
+# Stop
 docker-compose down
 ```
 

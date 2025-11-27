@@ -13,6 +13,9 @@ RUN apt-get update \
         curl \
         postgresql-client \
         redis-tools \
+        dos2unix \
+        iptables \
+        iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
@@ -22,11 +25,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the application
 COPY . .
 
-# Make the entrypoint script executable
-RUN chmod +x /app/docker-entrypoint.sh
-
 # Expose the port
 EXPOSE 8000
 
-# Use the entrypoint script
-ENTRYPOINT ["/app/docker-entrypoint.sh"]
+# Use Python entrypoint to avoid Windows line ending issues
+ENTRYPOINT ["python", "/app/entrypoint.py"]

@@ -10,11 +10,18 @@ import random
 import asyncio
 from app.models.domain.threat import ThreatData, ThreatResponse
 from app.services.threat_detection import ThreatDetectionService
+from app.services.openai_service import get_openai_service
+from app.services.geolocation_service import enrich_threat_with_location
+from app.services.remediation_service import get_remediation_service
+from app.services.auto_response_service import get_auto_response_service
 from app.db.models import User
 from app.api.deps import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Get OpenAI service
+openai_service = get_openai_service()
 
 class ThreatData(BaseModel):
     source_ip: str = Field(..., description="Source IP address")
@@ -46,33 +53,74 @@ async def analyze_threat(
     threat_data: ThreatData,
 ) -> JSONResponse:
     """
-    Analyze potential security threat data
+    Analyze potential security threat data using AI
     """
     try:
         logger.info(f"Analyzing threat from {threat_data.source_ip}")
         
-        # Call the threat detection service
-        severity, confidence, techniques = await threat_service.analyze_threat(threat_data.dict())
+        threat_dict = threat_data.dict()
         
-        # Generate recommendation based on severity
-        recommendation = generate_recommendation(severity)
+        # Try OpenAI analysis first
+        ai_analysis = None
+        if openai_service.available:
+            logger.info("Using OpenAI for threat analysis")
+            ai_analysis = openai_service.analyze_threat(threat_dict)
         
-        # Store the analyzed threat for the recent threats endpoint
+        if ai_analysis:
+            # Use OpenAI analysis results
+            severity = ai_analysis.get("severity", "MEDIUM")
+            confidence = ai_analysis.get("risk_score", 50) / 100.0
+            techniques = ai_analysis.get("mitre_techniques", [])
+            recommendation = ai_analysis.get("recommendation", "Review and investigate")
+            remediation_steps = ai_analysis.get("remediation_steps", [])
+            threat_type = ai_analysis.get("threat_type", threat_dict.get("behavior", "Unknown"))
+            description = ai_analysis.get("description", "")
+        else:
+            # Fallback to basic threat detection service
+            severity, confidence, techniques = await threat_service.analyze_threat(threat_dict)
+            recommendation = generate_recommendation(severity)
+            remediation_steps = generate_default_remediation(severity, threat_dict.get("source_ip"))
+            threat_type = threat_dict.get("behavior", "Unknown")
+            description = ""
+        
+        # Generate threat ID
         threat_id = str(uuid.uuid4())
+        
+        # Build analyzed threat with geolocation
         analyzed_threat = {
-            **threat_data.dict(),
+            **threat_dict,
             "id": threat_id,
             "severity": severity,
             "confidence": confidence,
             "techniques": techniques,
             "recommendation": recommendation,
+            "remediation_steps": remediation_steps,
+            "threat_type": threat_type,
+            "description": description,
+            "ai_analyzed": ai_analysis is not None,
             "analysis_time": datetime.utcnow().isoformat()
         }
+        
+        # Add geolocation data
+        analyzed_threat = enrich_threat_with_location(analyzed_threat)
+        
         _recent_threats.append(analyzed_threat)
         
         # Trim the list if needed
         if len(_recent_threats) > _MAX_RECENT_THREATS:
             _recent_threats.pop(0)
+        
+        # Evaluate for auto-response
+        auto_response_result = None
+        try:
+            auto_response_service = get_auto_response_service()
+            auto_response_result = await auto_response_service.evaluate_threat(analyzed_threat)
+            
+            if auto_response_result.get("action_taken"):
+                analyzed_threat["auto_response"] = auto_response_result
+                logger.info(f"Auto-response triggered for threat {threat_id}: {auto_response_result.get('action_taken')}")
+        except Exception as ar_error:
+            logger.error(f"Auto-response evaluation error: {ar_error}")
         
         # Return the response
         return JSONResponse(
@@ -82,7 +130,13 @@ async def analyze_threat(
                 "confidence": confidence,
                 "techniques": techniques,
                 "recommendation": recommendation,
-                "id": threat_id
+                "remediation_steps": remediation_steps,
+                "id": threat_id,
+                "ai_analyzed": ai_analysis is not None,
+                "latitude": analyzed_threat.get("latitude"),
+                "longitude": analyzed_threat.get("longitude"),
+                "location": analyzed_threat.get("location"),
+                "auto_response": auto_response_result
             }
         )
     except Exception as e:
@@ -370,3 +424,140 @@ def generate_recommendation(severity: str) -> str:
         "UNKNOWN": "Unable to assess severity. Manual investigation recommended."
     }
     return recommendations.get(severity, "Unable to determine recommended action.")
+
+
+def generate_default_remediation(severity: str, source_ip: str) -> List[Dict[str, Any]]:
+    """Generate default remediation steps when OpenAI is not available"""
+    steps = []
+    
+    if severity in ["HIGH", "MEDIUM"]:
+        steps.append({
+            "action": "block_ip",
+            "target": source_ip,
+            "description": f"Block IP address {source_ip} at firewall",
+            "automated": True,
+            "command": f"iptables -A INPUT -s {source_ip} -j DROP"
+        })
+    
+    if severity == "HIGH":
+        steps.append({
+            "action": "isolate_system",
+            "target": "affected_host",
+            "description": "Isolate affected system from network",
+            "automated": False
+        })
+        steps.append({
+            "action": "alert_team",
+            "target": "security_team",
+            "description": "Alert security team for immediate response",
+            "automated": True
+        })
+    
+    if severity in ["HIGH", "MEDIUM", "LOW"]:
+        steps.append({
+            "action": "log_incident",
+            "target": "siem",
+            "description": "Log incident to SIEM for tracking",
+            "automated": True
+        })
+    
+    return steps
+
+
+@router.post("/{threat_id}/apply-fix")
+async def apply_fix(
+    threat_id: str,
+    fix_index: int = 0,
+) -> JSONResponse:
+    """
+    Apply a remediation fix for a threat.
+    Executes real security commands with proper safeguards.
+    """
+    try:
+        # Find the threat
+        threat = next((t for t in _recent_threats if t.get("id") == threat_id), None)
+        
+        if not threat:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content={"error": f"Threat {threat_id} not found"}
+            )
+        
+        remediation_steps = threat.get("remediation_steps", [])
+        
+        if not remediation_steps:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"error": "No remediation steps available for this threat"}
+            )
+        
+        if fix_index >= len(remediation_steps):
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"error": f"Invalid fix index. Available: 0-{len(remediation_steps)-1}"}
+            )
+        
+        fix = remediation_steps[fix_index]
+        action = fix.get("action", "")
+        
+        logger.info(f"Applying fix '{action}' for threat {threat_id}")
+        
+        # Get remediation service and execute the action
+        remediation_service = get_remediation_service()
+        
+        # Prepare parameters for remediation
+        params = {
+            "target": fix.get("target") or threat.get("source_ip"),
+            "rule": fix.get("rule", ""),
+            "threat_id": threat_id,
+            "severity": threat.get("severity", "MEDIUM"),
+            "details": fix.get("description", ""),
+            "threat_data": threat
+        }
+        
+        # Execute the remediation action
+        result = remediation_service.execute_remediation(action, params)
+        
+        # Build fix result
+        fix_result = {
+            "success": result.get("success", False),
+            "action": action,
+            "target": params.get("target"),
+            "description": fix.get("description"),
+            "executed_at": result.get("executed_at", datetime.utcnow().isoformat()),
+            "command": result.get("command", fix.get("command", "N/A")),
+            "output": result.get("output", ""),
+            "rollback_command": result.get("rollback_command"),
+            "dry_run": result.get("dry_run", False)
+        }
+        
+        if not result.get("success"):
+            fix_result["error"] = result.get("error", "Unknown error")
+        
+        # Update threat status
+        if "applied_fixes" not in threat:
+            threat["applied_fixes"] = []
+        threat["applied_fixes"].append(fix_result)
+        
+        # Update status based on action success
+        if result.get("success"):
+            if action == "block_ip":
+                threat["status"] = "MITIGATED"
+            else:
+                threat["status"] = "IN_PROGRESS"
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "message": f"Fix {'applied' if result.get('success') else 'failed'}: {action}",
+                "fix": fix_result,
+                "threat_status": threat.get("status")
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Error applying fix: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": f"Failed to apply fix: {str(e)}"}
+        )

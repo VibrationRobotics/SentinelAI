@@ -66,9 +66,13 @@ coverage.xml
 *.crt
 .env
 .env.*
+!.env.example
 settings.json
 *_config.json
 *secrets*.json
+
+# Private planning documents
+PLAN.md
 
 # Ignore default SQLite database files
 snort_threats.db

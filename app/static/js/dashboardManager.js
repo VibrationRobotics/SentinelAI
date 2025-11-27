@@ -199,11 +199,92 @@ function populateDashboard(threatData) {
         updateStats(threatData);
         updateAIMetrics(threatData);
         updateMap(threatData);
+        updateTimeline(threatData);
         
         console.log('Dashboard updated successfully');
     } catch (error) {
         console.error('Error populating dashboard:', error);
     }
+}
+
+/**
+ * Update the activity timeline with threat data
+ * @param {Array} threatData - Array of threat objects
+ */
+function updateTimeline(threatData) {
+    console.log('Updating activity timeline');
+    
+    const timeline = document.getElementById('timeline');
+    if (!timeline) {
+        console.warn('Timeline element not found');
+        return;
+    }
+    
+    // Clear existing content
+    timeline.innerHTML = '';
+    
+    if (threatData.length === 0) {
+        timeline.innerHTML = '<p class="text-muted text-center">No recent activity</p>';
+        return;
+    }
+    
+    // Sort by analysis_time (newest first) and take top 10
+    const sortedThreats = [...threatData].sort((a, b) => {
+        const timeA = new Date(a.analysis_time || a.timestamp || 0);
+        const timeB = new Date(b.analysis_time || b.timestamp || 0);
+        return timeB - timeA;
+    }).slice(0, 10);
+    
+    // Create timeline items
+    sortedThreats.forEach(threat => {
+        const severity = (threat.severity || 'NORMAL').toUpperCase();
+        let severityClass = 'secondary';
+        let severityIcon = 'bi-info-circle';
+        
+        if (severity === 'HIGH') {
+            severityClass = 'danger';
+            severityIcon = 'bi-exclamation-triangle-fill';
+        } else if (severity === 'MEDIUM') {
+            severityClass = 'warning';
+            severityIcon = 'bi-exclamation-circle';
+        } else if (severity === 'LOW') {
+            severityClass = 'info';
+            severityIcon = 'bi-info-circle';
+        }
+        
+        // Format time
+        const timeStr = threat.analysis_time || threat.timestamp;
+        let formattedTime = 'Unknown time';
+        if (timeStr) {
+            const date = new Date(timeStr);
+            if (!isNaN(date.getTime())) {
+                formattedTime = date.toLocaleTimeString();
+            }
+        }
+        
+        const threatType = threat.behavior || threat.type || 'Unknown threat';
+        const source = threat.source_ip || threat.source || 'Unknown';
+        
+        const item = document.createElement('div');
+        item.className = 'timeline-item d-flex align-items-start mb-3';
+        item.innerHTML = `
+            <div class="timeline-marker me-3">
+                <i class="bi ${severityIcon} text-${severityClass} fs-5"></i>
+            </div>
+            <div class="timeline-content flex-grow-1">
+                <div class="d-flex justify-content-between align-items-center">
+                    <strong class="text-${severityClass}">${severity}</strong>
+                    <small class="text-muted">${formattedTime}</small>
+                </div>
+                <p class="mb-1 small">${threatType}</p>
+                <small class="text-muted">Source: ${source}</small>
+            </div>
+        `;
+        
+        timeline.appendChild(item);
+    });
+    
+    console.log('Timeline updated with', sortedThreats.length, 'items');
 }
 
 /**
@@ -220,12 +301,19 @@ function updateThreatActivityChart(threatData) {
             return;
         }
         
-        // Count threats by hour
+        // Count threats by hour using analysis_time (more reliable than timestamp)
         const hourCounts = Array(24).fill(0);
         
         threatData.forEach(threat => {
-            const hour = new Date(threat.timestamp).getHours();
-            hourCounts[hour]++;
+            // Use analysis_time as primary, fallback to timestamp
+            const timeStr = threat.analysis_time || threat.timestamp;
+            if (timeStr) {
+                const date = new Date(timeStr);
+                if (!isNaN(date.getTime())) {
+                    const hour = date.getHours();
+                    hourCounts[hour]++;
+                }
+            }
         });
         
         // Update chart data for Chart.js 2.x
@@ -252,12 +340,12 @@ function updateThreatOriginsChart(threatData) {
             return;
         }
         
-        // Aggregate threat sources
+        // Aggregate threat sources by source_ip
         const sourceCount = {};
         
-        // Count threats by source
+        // Count threats by source_ip (API field name)
         threatData.forEach(threat => {
-            const source = threat.source || 'Unknown';
+            const source = threat.source_ip || threat.source || 'Unknown';
             sourceCount[source] = (sourceCount[source] || 0) + 1;
         });
         
@@ -309,7 +397,7 @@ function updateSystemResourceCharts() {
  */
 function updateStats(threatData) {
     try {
-        // Count threats by severity
+        // Count threats by severity (API returns uppercase: HIGH, MEDIUM, LOW, NORMAL)
         let highCount = 0;
         let mediumCount = 0;
         let lowCount = 0;
@@ -320,9 +408,11 @@ function updateStats(threatData) {
         let responseTimeCount = 0;
         
         threatData.forEach(threat => {
-            if (threat.severity === 'high') highCount++;
-            else if (threat.severity === 'medium') mediumCount++;
-            else lowCount++;
+            const severity = (threat.severity || '').toUpperCase();
+            if (severity === 'HIGH') highCount++;
+            else if (severity === 'MEDIUM') mediumCount++;
+            else if (severity === 'LOW') lowCount++;
+            // NORMAL severity is not counted in high/medium/low
             
             // If threat has response time data
             if (threat.responseTime) {
@@ -362,43 +452,54 @@ function updateAIMetrics(threatData) {
     console.log('Updating AI metrics');
     
     try {
-        // Count AI-analyzed threats
-        const analyzedCount = threatData.filter(threat => threat.ai_analyzed).length;
+        // All threats are analyzed by our AI classifier
+        const analyzedCount = threatData.length;
         
-        // Count anomalies detected
-        const anomalyCount = threatData.filter(threat => 
-            threat.ai_analyzed && (threat.ai_anomaly_score > 0.7 || threat.isAnomaly)
+        // Count high severity threats as "anomalies" 
+        const anomalyCount = threatData.filter(threat => {
+            const severity = (threat.severity || '').toUpperCase();
+            return severity === 'HIGH';
+        }).length;
+        
+        // Count threats with MITRE techniques identified as "similar threats"
+        const similarThreatsCount = threatData.filter(threat => 
+            threat.techniques && threat.techniques.length > 0
         ).length;
         
-        // Count threats with pattern matches
-        const patternMatchCount = threatData.filter(threat => 
-            threat.ai_analyzed && threat.ai_pattern_match
-        ).length;
+        // Count medium+ severity as "metrics alerts"
+        const metricsAlertsCount = threatData.filter(threat => {
+            const severity = (threat.severity || '').toUpperCase();
+            return severity === 'HIGH' || severity === 'MEDIUM';
+        }).length;
         
-        // Update UI elements with the counts using the correct element IDs
-        const analyzedElement = document.getElementById('ai-analyzed-count');
-        const anomalyElement = document.getElementById('ai-anomalies');
-        const patternElement = document.getElementById('ai-patterns');
+        // Calculate average confidence
+        let totalConfidence = 0;
+        threatData.forEach(threat => {
+            totalConfidence += threat.confidence || 0.5;
+        });
+        const avgConfidence = threatData.length > 0 ? Math.round((totalConfidence / threatData.length) * 100) : 0;
         
-        if (analyzedElement) {
-            analyzedElement.textContent = analyzedCount;
-        } else {
-            console.warn('AI analyzed count element not found (ID: ai-analyzed-count)');
-        }
+        // Update UI elements with the counts (top stats bar)
+        updateElementText('ai-analyzed-count', analyzedCount);
+        updateElementText('ai-anomalies', anomalyCount);
+        updateElementText('ai-similar-threats', similarThreatsCount);
+        updateElementText('ai-metrics-alerts', metricsAlertsCount);
+        updateElementText('ai-confidence', avgConfidence + '%');
         
-        if (anomalyElement) {
-            anomalyElement.textContent = anomalyCount;
-        } else {
-            console.warn('AI anomalies element not found (ID: ai-anomalies)');
-        }
+        // Update AI Performance section (bottom panel)
+        updateElementText('ai-perf-analyzed', analyzedCount);
+        updateElementText('ai-perf-anomalies', anomalyCount);
+        updateElementText('ai-perf-similar', similarThreatsCount);
+        updateElementText('ai-perf-alerts', metricsAlertsCount);
+        updateElementText('ai-perf-confidence', avgConfidence + '%');
         
-        if (patternElement) {
-            patternElement.textContent = patternMatchCount;
-        } else {
-            console.warn('AI patterns element not found (ID: ai-patterns)');
-        }
-        
-        console.log('AI metrics updated');
+        console.log('AI metrics updated:', {
+            analyzed: analyzedCount,
+            anomalies: anomalyCount,
+            similar: similarThreatsCount,
+            alerts: metricsAlertsCount,
+            confidence: avgConfidence
+        });
     } catch (error) {
         console.error('Error updating AI metrics:', error);
     }
@@ -497,6 +598,8 @@ function formatDateTime(dateString) {
 // Export functions for other modules
 window.DashboardManager = {
     initCharts,
+    initThreatActivityChart,
+    initOriginsChart: initThreatOriginsChart,
     populateDashboard,
     updateStats,
     updateAIMetrics

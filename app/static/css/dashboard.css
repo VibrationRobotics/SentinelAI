@@ -244,10 +244,26 @@ body {
 }
 
 /* Map */
-#threat-map {
-    height: 400px;
+#threat-map, #map {
+    height: 300px;
     width: 100%;
     border-radius: 8px;
+    background-color: #e9ecef;
+}
+
+.map-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #6c757d;
+    font-size: 0.9rem;
+}
+
+/* Limited height for scrollable sections */
+.limited-height {
+    max-height: 400px;
+    overflow-y: auto;
 }
 
 /* Charts */

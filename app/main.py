@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from app.core.config import settings
 # Gradually add routers one by one to isolate any issues
-from app.api.endpoints import auth, incidents, analysis, threats, ai
+from app.api.endpoints import auth, incidents, analysis, threats, ai, auto_response, monitoring, logs, windows
 from app.db.base import Base, engine
 import logging
 from datetime import datetime
@@ -53,27 +53,26 @@ api_router.include_router(incidents.router, prefix="/incidents", tags=["incident
 api_router.include_router(analysis.router, prefix="/analysis", tags=["analysis"])
 api_router.include_router(threats.router, prefix="/threats", tags=["threats"])
 api_router.include_router(ai.router, prefix="/ai", tags=["ai"])
+api_router.include_router(auto_response.router, prefix="/auto-response", tags=["auto-response"])
+api_router.include_router(monitoring.router, prefix="/monitoring", tags=["monitoring"])
+api_router.include_router(logs.router, prefix="/logs", tags=["logs"])
+api_router.include_router(windows.router, prefix="/windows", tags=["windows"])
 
 # Add proxy endpoint to forward requests to the API
 @app.get("/api/proxy/threats/recent")
 async def proxy_recent_threats():
     """
-    Proxy endpoint to forward requests from frontend to backend API
-    and avoid CORS issues.
+    Proxy endpoint to forward requests from frontend to backend API.
+    Since we're in the same app, just call the threats endpoint directly.
     """
+    from app.api.endpoints.threats import get_recent_threats
     try:
-        # Use the Docker service name 'web' instead of 'localhost'
-        async with httpx.AsyncClient() as client:
-            resp = await client.get("http://web:8000/api/v1/threats/recent")
-            return JSONResponse(
-                status_code=resp.status_code,
-                content=resp.json()
-            )
+        return await get_recent_threats()
     except Exception as e:
-        logger.error(f"Error proxying request to API: {str(e)}")
+        logger.error(f"Error getting recent threats: {str(e)}")
         return JSONResponse(
             status_code=500,
-            content={"error": f"API proxy error: {str(e)}"}
+            content={"error": f"Error: {str(e)}"}
         )
 
 # Add services status endpoint

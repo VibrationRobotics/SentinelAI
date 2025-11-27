@@ -9,6 +9,14 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/dashboard.css">
+    <style>
+        /* Hide Azure-specific sections for local mode */
+        #openai-section, #search-section, #metrics-section, #synapse-module-section,
+        #security-status-section, #azure-detection-section, #openai-module-section,
+        #anomaly-module-section, #content-safety-module-section, #synapse-section,
+        #content-safety-section, .azure-service-badge,
+        h4:has(.azure-service-badge) { display: none !important; }
+    </style>
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
@@ -38,17 +46,6 @@
                         <a class="nav-link" href="#" data-bs-toggle="modal" data-bs-target="#settingsModal">
                             <i class="bi bi-gear-fill"></i> Settings
                         </a>
-                    </li>
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <span class="badge bg-primary azure-service-badge">Azure AI</span>
-                        </a>
-                        <ul class="dropdown-menu" aria-labelledby="azureDropdown">
-                            <li><a class="dropdown-item" href="#search-section">AI Search</a></li>
-                            <li><a class="dropdown-item" href="#metrics-section">Metrics Advisor</a></li>
-                            <li><a class="dropdown-item" href="#synapse-module-section">Synapse Analytics</a></li>
-                            <li><a class="dropdown-item" href="#security-status-section">Security Status</a></li>
-                        </ul>
                     </li>
                 </ul>
                 <div class="d-flex align-items-center">
@@ -129,11 +126,11 @@
             </div>
         </div>
 
-        <!-- Azure AI Stats Row -->
+        <!-- AI Stats Row -->
         <div class="row mb-4">
             <div class="col-12">
                 <div class="d-flex justify-content-between align-items-center mb-2">
-                    <h5><span class="badge bg-primary azure-service-badge">Azure AI</span> Intelligence Metrics</h5>
+                    <h5><i class="bi bi-cpu text-primary me-2"></i>AI Intelligence Metrics</h5>
                     <button class="btn btn-sm btn-outline-primary" id="refresh-ai-stats">Refresh AI Data</button>
                 </div>
             </div>
@@ -141,7 +138,7 @@
                 <div class="card stat-card border-primary">
                     <div class="card-body">
                         <div class="stat-value text-primary" id="ai-analyzed-count">0</div>
-                        <div class="stat-label">AI Analyzed Threats</div>
+                        <div class="stat-label">Threats Analyzed</div>
                     </div>
                 </div>
             </div>
@@ -157,7 +154,7 @@
                 <div class="card stat-card border-primary">
                     <div class="card-body">
                         <div class="stat-value text-primary" id="ai-similar-threats">0</div>
-                        <div class="stat-label">Similar Threats</div>
+                        <div class="stat-label">MITRE Techniques</div>
                     </div>
                 </div>
             </div>
@@ -261,6 +258,164 @@
                             <div id="timeline" class="timeline limited-height">
                                 <!-- Timeline events will be loaded here -->
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Monitoring Section -->
+        <h4 class="mt-5 mb-3"><i class="bi bi-shield-check text-success me-2"></i>System Protection Status</h4>
+        
+        <!-- Auto-Response Status -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card border-success">
+                    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-lightning-charge-fill me-2"></i>Auto-Response System</span>
+                        <div>
+                            <span class="badge bg-light text-success me-2" id="auto-response-status">Checking...</span>
+                            <button class="btn btn-sm btn-light" id="toggle-auto-response" title="Toggle Auto-Response"><i class="bi bi-power"></i></button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="row text-center">
+                            <div class="col"><div class="display-6 text-success" id="auto-blocked-count">0</div><small class="text-muted">IPs Blocked</small></div>
+                            <div class="col"><div class="display-6 text-primary" id="auto-actions-hour">0</div><small class="text-muted">Actions/Hour</small></div>
+                            <div class="col"><div class="display-6 text-warning" id="auto-threshold">HIGH</div><small class="text-muted">Threshold</small></div>
+                            <div class="col"><div class="display-6 text-info" id="whitelist-count">0</div><small class="text-muted">Whitelisted</small></div>
+                            <div class="col"><span class="badge bg-success fs-6" id="auto-mode-badge">ENABLED</span><br><small class="text-muted">Mode</small></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Monitoring Services -->
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-hdd-network me-2"></i>Network Monitor</span>
+                        <button class="btn btn-sm btn-light" id="toggle-network-monitor" title="Toggle"><i class="bi bi-play-fill"></i></button>
+                    </div>
+                    <div class="card-body">
+                        <p class="mb-2">Status: <span class="badge bg-secondary" id="network-monitor-status">Stopped</span></p>
+                        <p class="mb-2">Packets: <span id="network-packets">0</span></p>
+                        <p class="mb-2">Port Scans: <span class="text-danger" id="network-port-scans">0</span></p>
+                        <p class="mb-0">Brute Force: <span class="text-warning" id="network-brute-force">0</span></p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-header bg-warning text-dark d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-file-earmark-lock me-2"></i>File Scanner</span>
+                        <button class="btn btn-sm btn-dark" id="toggle-file-scanner" title="Toggle"><i class="bi bi-play-fill"></i></button>
+                    </div>
+                    <div class="card-body">
+                        <p class="mb-2">Status: <span class="badge bg-secondary" id="file-scanner-status">Stopped</span></p>
+                        <p class="mb-2">Scanned: <span id="files-scanned">0</span></p>
+                        <p class="mb-2">Threats: <span class="text-danger" id="files-threats">0</span></p>
+                        <p class="mb-0">Quarantined: <span class="text-warning" id="files-quarantined">0</span></p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100">
+                    <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-cpu me-2"></i>Process Monitor</span>
+                        <button class="btn btn-sm btn-light" id="toggle-process-monitor" title="Toggle"><i class="bi bi-play-fill"></i></button>
+                    </div>
+                    <div class="card-body">
+                        <p class="mb-2">Status: <span class="badge bg-secondary" id="process-monitor-status">Stopped</span></p>
+                        <p class="mb-2">Monitored: <span id="processes-monitored">0</span></p>
+                        <p class="mb-2">Suspicious: <span class="text-danger" id="processes-suspicious">0</span></p>
+                        <p class="mb-0">Events: <span id="processes-events">0</span></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Log Collector & System Info -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-journal-text me-2"></i>Log Collector</span>
+                        <button class="btn btn-sm btn-light" id="toggle-log-collector" title="Toggle"><i class="bi bi-play-fill"></i></button>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-6">
+                                <p class="mb-2">Status: <span class="badge bg-secondary" id="log-collector-status">Stopped</span></p>
+                                <p class="mb-2">Entries: <span id="logs-collected">0</span></p>
+                                <p class="mb-0">Threats: <span class="text-danger" id="logs-threats">0</span></p>
+                            </div>
+                            <div class="col-6">
+                                <p class="mb-1"><span class="badge bg-danger">HIGH</span> <span id="logs-high">0</span></p>
+                                <p class="mb-1"><span class="badge bg-warning">MED</span> <span id="logs-medium">0</span></p>
+                                <p class="mb-0"><span class="badge bg-info">LOW</span> <span id="logs-low">0</span></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header bg-dark text-white"><i class="bi bi-pc-display me-2"></i>System Info</div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-6">
+                                <p class="mb-2">Platform: <span id="sys-platform">-</span></p>
+                                <p class="mb-2">Host: <span id="sys-hostname">-</span></p>
+                                <p class="mb-0">CPUs: <span id="sys-cpu">-</span></p>
+                            </div>
+                            <div class="col-6">
+                                <p class="mb-2">Memory: <span id="sys-memory">-</span></p>
+                                <p class="mb-2">Disk: <span id="sys-disk">-</span></p>
+                                <p class="mb-0">Firewall: <span class="badge bg-secondary" id="sys-firewall">-</span></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Connected Agents -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-hdd-network me-2"></i>Connected Windows Agents</span>
+                        <button class="btn btn-sm btn-light" id="refresh-agents" title="Refresh"><i class="bi bi-arrow-clockwise"></i></button>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead class="table-light"><tr><th>Hostname</th><th>Platform</th><th>Status</th><th>Capabilities</th><th>Last Seen</th></tr></thead>
+                                <tbody id="agents-table"><tr><td colspan="5" class="text-center text-muted py-3">No agents connected</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Security Events -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-shield-exclamation me-2"></i>Recent Security Events</span>
+                        <button class="btn btn-sm btn-light" id="refresh-security-events" title="Refresh"><i class="bi bi-arrow-clockwise"></i></button>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive" style="max-height: 200px;">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead class="table-light"><tr><th>Time</th><th>Source</th><th>Type</th><th>Severity</th><th>Description</th></tr></thead>
+                                <tbody id="security-events-table"><tr><td colspan="5" class="text-center text-muted py-3">Start monitoring to see events</td></tr></tbody>
+                            </table>
                         </div>
                     </div>
                 </div>
@@ -752,23 +907,23 @@
                     <div class="card-body">
                         <div class="d-flex justify-content-between mb-2">
                             <span>AI Systems Analyzed</span>
-                            <span id="ai-analyzed-count" class="fw-bold">0</span>
+                            <span id="ai-perf-analyzed" class="fw-bold">0</span>
                         </div>
                         <div class="d-flex justify-content-between mb-2">
                             <span>Anomalies Detected</span>
-                            <span id="ai-anomalies" class="fw-bold">0</span>
+                            <span id="ai-perf-anomalies" class="fw-bold">0</span>
                         </div>
                         <div class="d-flex justify-content-between mb-2">
                             <span>Similar Threat Patterns</span>
-                            <span id="ai-similar-threats" class="fw-bold">0</span>
+                            <span id="ai-perf-similar" class="fw-bold">0</span>
                         </div>
                         <div class="d-flex justify-content-between mb-2">
                             <span>Metrics Alerts</span>
-                            <span id="ai-metrics-alerts" class="fw-bold">0</span>
+                            <span id="ai-perf-alerts" class="fw-bold">0</span>
                         </div>
                         <div class="d-flex justify-content-between mb-2">
                             <span>AI Confidence Level</span>
-                            <span id="ai-confidence" class="fw-bold">0%</span>
+                            <span id="ai-perf-confidence" class="fw-bold">0%</span>
                         </div>
                     </div>
                 </div>
@@ -1139,5 +1294,6 @@
     <script src="js/threatManager.js"></script>
     <script src="js/dashboardManager.js"></script>
     <script src="js/main.js"></script>
+    <script src="js/monitoring.js"></script>
 </body>
 </html>

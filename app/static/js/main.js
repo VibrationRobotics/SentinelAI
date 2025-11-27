@@ -137,17 +137,20 @@ function loadPage(pageName) {
 function initializeDashboard() {
     console.log('Initializing dashboard');
     
-    // Refresh the dashboard data
-    refreshDashboardData();
+    // Initialize charts via dashboardManager
+    if (typeof DashboardManager !== 'undefined' && typeof DashboardManager.initCharts === 'function') {
+        DashboardManager.initCharts();
+    }
     
-    // Initialize charts
-    initializeCharts();
-    
-    // Load recent threats
-    loadRecentThreats();
+    // Load recent threats - use fetchThreats which is defined later
+    if (typeof fetchThreats === 'function') {
+        fetchThreats();
+    }
     
     // Load AI stats
-    refreshAIData();
+    if (typeof refreshAIData === 'function') {
+        refreshAIData();
+    }
 }
 
 /**
@@ -221,23 +224,34 @@ function startDataRefreshCycle() {
     
     // Refresh dashboard data every 60 seconds
     setInterval(function() {
-        // Only refresh if dashboard is visible
-        if (!document.getElementById('dashboard-content').classList.contains('d-none')) {
-            refreshDashboardData();
+        const dashboardContent = document.getElementById('dashboard-content');
+        if (dashboardContent && !dashboardContent.classList.contains('d-none')) {
+            if (typeof refreshDashboardData === 'function') {
+                refreshDashboardData();
+            }
+        } else {
+            // If no specific content div, just refresh threats
+            if (typeof fetchThreats === 'function') {
+                fetchThreats();
+            }
         }
     }, 60000);
     
     // Refresh threats data every 30 seconds
     setInterval(function() {
-        // Only refresh if threats page is visible
-        if (!document.getElementById('threats-content').classList.contains('d-none')) {
-            loadThreatsData();
+        const threatsContent = document.getElementById('threats-content');
+        if (threatsContent && !threatsContent.classList.contains('d-none')) {
+            if (typeof loadThreatsData === 'function') {
+                loadThreatsData();
+            }
         }
     }, 30000);
     
     // Refresh AI stats every 120 seconds
     setInterval(function() {
-        refreshAIData();
+        if (typeof refreshAIData === 'function') {
+            refreshAIData();
+        }
     }, 120000);
 }
 
@@ -603,9 +617,11 @@ function updateThreatsList(threats) {
         return;
     }
     
-    // Sort threats by timestamp (newest first)
+    // Sort threats by analysis_time (newest first) - more reliable than timestamp
     const sortedThreats = [...threats].sort((a, b) => {
-        return new Date(b.timestamp) - new Date(a.timestamp);
+        const timeA = new Date(b.analysis_time || b.timestamp || 0);
+        const timeB = new Date(a.analysis_time || a.timestamp || 0);
+        return timeA - timeB;
     });
     
     // Create a table for threats
@@ -632,22 +648,44 @@ function updateThreatsList(threats) {
     sortedThreats.forEach(threat => {
         const tr = document.createElement('tr');
         
+        // Normalize severity to uppercase for comparison
+        const severity = (threat.severity || 'NORMAL').toUpperCase();
+        
         // Set row class based on severity
-        if (threat.severity === 'high') {
+        if (severity === 'HIGH') {
             tr.className = 'table-danger';
-        } else if (threat.severity === 'medium') {
+        } else if (severity === 'MEDIUM') {
             tr.className = 'table-warning';
         }
         
-        // Format the date
-        const date = new Date(threat.timestamp);
-        const formattedDate = date.toLocaleString();
+        // Format the date using analysis_time (more reliable)
+        const timeStr = threat.analysis_time || threat.timestamp;
+        let formattedDate = 'Unknown';
+        if (timeStr) {
+            const date = new Date(timeStr);
+            if (!isNaN(date.getTime())) {
+                formattedDate = date.toLocaleString();
+            }
+        }
+        
+        // Get threat type from behavior field (API uses behavior, not type)
+        const threatType = threat.behavior || threat.type || 'Unknown';
+        
+        // Get source from source_ip field (API uses source_ip, not source)
+        const source = threat.source_ip || threat.source || 'Unknown';
+        
+        // Determine badge color based on severity
+        let badgeClass = 'info';
+        if (severity === 'HIGH') badgeClass = 'danger';
+        else if (severity === 'MEDIUM') badgeClass = 'warning';
+        else if (severity === 'LOW') badgeClass = 'primary';
+        else if (severity === 'NORMAL') badgeClass = 'secondary';
         
         // Create the row content
         tr.innerHTML = `
-            <td>${threat.type || 'Unknown'}</td>
-            <td><span class="badge bg-${threat.severity === 'high' ? 'danger' : (threat.severity === 'medium' ? 'warning' : 'info')}">${threat.severity || 'low'}</span></td>
-            <td>${threat.source || 'Unknown'}</td>
+            <td>${threatType}</td>
+            <td><span class="badge bg-${badgeClass}">${severity}</span></td>
+            <td>${source}</td>
             <td>${formattedDate}</td>
             <td>
                 <button class="btn btn-sm btn-outline-secondary" data-threat-id="${threat.id}" onclick="showThreatDetails('${threat.id}')">
@@ -704,11 +742,12 @@ function showThreatDetails(threatId) {
     `;
     
     // Populate details
-    const detailsContainer = document.getElementById('threat-details-content');
+    const detailsContainer = document.getElementById('threatDetailsContent');
     if (detailsContainer) {
-        // Format timestamps for readability
-        const timestamp = new Date(threat.timestamp).toLocaleString();
-        const detectedTime = new Date(threat.detection_time || threat.timestamp).toLocaleString();
+        // Format timestamps for readability - prefer analysis_time over timestamp
+        const timeValue = threat.analysis_time || threat.timestamp || threat.detection_time;
+        const timestamp = timeValue ? new Date(timeValue).toLocaleString() : 'Unknown';
+        const detectedTime = timestamp;
         
         // Build the details HTML
         let detailsHtml = `
@@ -785,6 +824,85 @@ function showThreatDetails(threatId) {
             `;
         }
         
+        // Add location info if available
+        if (threat.location || threat.latitude) {
+            detailsHtml += `
+                <div class="row mb-3">
+                    <div class="col-12">
+                        <div class="card border-secondary">
+                            <div class="card-header bg-secondary text-white">
+                                <i class="bi bi-geo-alt"></i> Threat Origin
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-2"><strong>Location:</strong> ${threat.location?.city || 'Unknown'}, ${threat.location?.country || threat.location?.country_name || 'Unknown'}</div>
+                                <div class="mb-2"><strong>Coordinates:</strong> ${threat.latitude?.toFixed(4) || 'N/A'}, ${threat.longitude?.toFixed(4) || 'N/A'}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Add remediation steps if available
+        if (threat.remediation_steps && threat.remediation_steps.length > 0) {
+            let stepsHtml = '';
+            threat.remediation_steps.forEach((step, index) => {
+                const isApplied = threat.applied_fixes?.some(f => f.action === step.action);
+                const btnClass = isApplied ? 'btn-success disabled' : (step.automated ? 'btn-warning' : 'btn-outline-secondary');
+                const btnText = isApplied ? '<i class="bi bi-check-circle"></i> Applied' : (step.automated ? '<i class="bi bi-play-circle"></i> Apply Fix' : '<i class="bi bi-hand-index"></i> Manual');
+                
+                stepsHtml += `
+                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>${step.action?.replace(/_/g, ' ').toUpperCase()}</strong>
+                            <br><small class="text-muted">${step.description || ''}</small>
+                            ${step.command ? `<br><code class="small">${step.command}</code>` : ''}
+                        </div>
+                        <button class="btn btn-sm ${btnClass}" 
+                                onclick="applyFix('${threat.id}', ${index})"
+                                ${isApplied || !step.automated ? 'disabled' : ''}>
+                            ${btnText}
+                        </button>
+                    </div>
+                `;
+            });
+            
+            detailsHtml += `
+                <div class="row mb-3">
+                    <div class="col-12">
+                        <div class="card border-warning">
+                            <div class="card-header bg-warning text-dark">
+                                <i class="bi bi-tools"></i> Remediation Steps
+                            </div>
+                            <div class="card-body p-0">
+                                <div class="list-group list-group-flush">
+                                    ${stepsHtml}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Add description if available (from AI analysis)
+        if (threat.description) {
+            detailsHtml += `
+                <div class="row mb-3">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="bi bi-file-text"></i> Analysis Details
+                            </div>
+                            <div class="card-body">
+                                ${threat.description}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
         detailsContainer.innerHTML = detailsHtml;
         
         // Update button states based on threat resolved status
@@ -825,6 +943,75 @@ function showThreatDetails(threatId) {
     // Show the modal
     const modalElement = bootstrap.Modal.getInstance(modal) || new bootstrap.Modal(modal);
     modalElement.show();
+}
+
+/**
+ * Apply a fix for a threat
+ * @param {string} threatId - ID of the threat
+ * @param {number} fixIndex - Index of the fix to apply
+ */
+function applyFix(threatId, fixIndex) {
+    console.log(`Applying fix ${fixIndex} for threat ${threatId}`);
+    
+    // Show confirmation dialog
+    const threat = currentThreats.find(t => t.id === threatId);
+    if (!threat) {
+        showNotification('Threat not found', 'danger');
+        return;
+    }
+    
+    const fix = threat.remediation_steps?.[fixIndex];
+    if (!fix) {
+        showNotification('Fix not found', 'danger');
+        return;
+    }
+    
+    const confirmMsg = `Are you sure you want to apply this fix?\n\nAction: ${fix.action?.replace(/_/g, ' ').toUpperCase()}\nDescription: ${fix.description}\n${fix.command ? `Command: ${fix.command}` : ''}`;
+    
+    if (!confirm(confirmMsg)) {
+        return;
+    }
+    
+    showNotification('Applying fix...', 'info');
+    
+    // Call the API to apply the fix
+    fetch(`/api/v1/threats/${threatId}/apply-fix?fix_index=${fixIndex}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        console.log('Fix applied:', data);
+        
+        // Update the threat in the current threats array
+        const threatIndex = currentThreats.findIndex(t => t.id === threatId);
+        if (threatIndex !== -1) {
+            if (!currentThreats[threatIndex].applied_fixes) {
+                currentThreats[threatIndex].applied_fixes = [];
+            }
+            currentThreats[threatIndex].applied_fixes.push(data.fix);
+            currentThreats[threatIndex].status = data.threat_status;
+        }
+        
+        showNotification(`Fix applied successfully: ${fix.action}`, 'success');
+        
+        // Refresh the modal to show updated state
+        showThreatDetails(threatId);
+        
+        // Refresh the threats list
+        fetchThreats();
+    })
+    .catch(error => {
+        console.error('Error applying fix:', error);
+        showNotification('Error applying fix: ' + error.message, 'danger');
+    });
 }
 
 /**
