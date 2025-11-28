@@ -352,6 +352,65 @@ class WindowsAgent:
             logger.debug(f"AI analysis error: {e}")
             return {'is_threat': False, 'confidence': 0, 'reason': f'Error: {e}'}
     
+    def _analyze_event_with_ai(self, event: SecurityEvent) -> Dict:
+        """
+        Send any security event to AI for intelligent analysis.
+        Used for HIGH/CRITICAL severity events from all monitors.
+        """
+        if not self.use_ai:
+            return None
+        
+        # Create cache key from event type and description
+        cache_key = f"{event.event_type}:{event.description[:100]}"
+        
+        # Check cache first
+        if cache_key in self.ai_cache:
+            return self.ai_cache[cache_key]
+        
+        try:
+            analysis_request = {
+                'source_ip': event.ip_address or '127.0.0.1',
+                'threat_type': event.event_type,
+                'severity': event.severity,
+                'description': f"[{event.source.upper()}] {event.description}",
+                'payload': json.dumps(event.details),
+                'timestamp': event.timestamp,
+                'agent_source': 'windows_agent',
+                'request_ai_analysis': True
+            }
+            
+            response = requests.post(
+                f"{self.api_base}/threats/analyze",
+                json=analysis_request,
+                timeout=15
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                self.stats['ai_analyses'] += 1
+                
+                ai_result = {
+                    'analyzed': True,
+                    'ai_severity': result.get('severity', event.severity),
+                    'ai_classification': result.get('classification', 'unknown'),
+                    'ai_confidence': result.get('confidence', 0.5),
+                    'ai_explanation': result.get('ai_analysis', {}).get('explanation', ''),
+                    'ai_recommendation': result.get('recommended_action', 'monitor'),
+                    'is_false_positive': result.get('ai_analysis', {}).get('is_false_positive', False),
+                    'mitre_techniques': result.get('ai_analysis', {}).get('mitre_techniques', [])
+                }
+                
+                # Cache the result
+                self.ai_cache[cache_key] = ai_result
+                
+                logger.info(f"AI analyzed {event.event_type}: {ai_result['ai_classification']} (confidence: {ai_result['ai_confidence']})")
+                return ai_result
+            
+        except Exception as e:
+            logger.debug(f"AI event analysis error: {e}")
+        
+        return None
+    
     def _smart_process_check(self, proc_info: Dict) -> tuple:
         """
         Two-stage process analysis:
@@ -417,11 +476,23 @@ class WindowsAgent:
         self.event_queue.put(event)
     
     def _event_sender_loop(self):
-        """Background thread to send events to dashboard."""
+        """Background thread to send events to dashboard with AI analysis for HIGH/CRITICAL."""
         while self.running:
             try:
                 # Get event with timeout
                 event = self.event_queue.get(timeout=1)
+                
+                # For HIGH/CRITICAL events, run AI analysis first
+                ai_result = None
+                if event.severity in ['HIGH', 'CRITICAL'] and self.use_ai:
+                    ai_result = self._analyze_event_with_ai(event)
+                    if ai_result:
+                        # Add AI analysis to event details
+                        event.details['ai_analysis'] = ai_result
+                        # Update severity if AI disagrees
+                        if ai_result.get('is_false_positive'):
+                            event.severity = 'LOW'
+                            logger.info(f"AI marked as false positive: {event.event_type}")
                 
                 # Send to dashboard
                 try:
@@ -434,14 +505,17 @@ class WindowsAgent:
                             'description': event.description,
                             'payload': json.dumps(event.details),
                             'timestamp': event.timestamp,
-                            'agent_source': 'windows_agent'
+                            'agent_source': 'windows_agent',
+                            'ai_analyzed': ai_result is not None,
+                            'request_ai_analysis': event.severity in ['HIGH', 'CRITICAL']
                         },
                         timeout=5
                     )
                     
                     if response.status_code == 200:
                         self.stats['events_sent'] += 1
-                        logger.info(f"Event sent: {event.event_type} - {event.description[:50]}")
+                        ai_tag = " [AI]" if ai_result else ""
+                        logger.info(f"Event sent{ai_tag}: {event.event_type} - {event.description[:50]}")
                     else:
                         logger.warning(f"Failed to send event: {response.status_code}")
                         

@@ -488,6 +488,35 @@ const MonitoringDashboard = {
     refreshSecurityEvents: async function() {
         const events = [];
 
+        // Get events from PostgreSQL database (primary source)
+        try {
+            const dbResponse = await fetch(`${this.apiBase}/windows/events?limit=50`);
+            if (dbResponse.ok) {
+                const data = await dbResponse.json();
+                if (data.events) {
+                    data.events.forEach(e => {
+                        const aiAnalysis = e.details?.ai_analysis;
+                        events.push({
+                            time: e.timestamp,
+                            source: e.hostname || 'Agent',
+                            type: e.event_type,
+                            severity: e.severity,
+                            description: e.description,
+                            ai_analyzed: aiAnalysis?.analyzed || false,
+                            ai_classification: aiAnalysis?.ai_classification,
+                            ai_confidence: aiAnalysis?.ai_confidence,
+                            ai_explanation: aiAnalysis?.ai_explanation,
+                            is_false_positive: aiAnalysis?.is_false_positive,
+                            mitre_techniques: aiAnalysis?.mitre_techniques || [],
+                            details: e.details
+                        });
+                    });
+                }
+            }
+        } catch (error) {
+            console.debug('Database events not available:', error);
+        }
+
         try {
             // Get network events
             const networkResponse = await fetch(`${this.apiBase}/monitoring/network/events?limit=10`);
@@ -572,11 +601,20 @@ const MonitoringDashboard = {
             console.debug('Auto-response history not available');
         }
 
-        // Sort by time descending
+        // Sort by time descending and deduplicate
         events.sort((a, b) => new Date(b.time) - new Date(a.time));
+        
+        // Remove duplicates based on time + description
+        const seen = new Set();
+        const uniqueEvents = events.filter(e => {
+            const key = `${e.time}-${e.description}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
 
         // Update table
-        this.updateSecurityEventsTable(events.slice(0, 20));
+        this.updateSecurityEventsTable(uniqueEvents.slice(0, 30));
     },
 
     /**
@@ -587,7 +625,7 @@ const MonitoringDashboard = {
         if (!tbody) return;
 
         if (events.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">No security events detected</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No security events detected</td></tr>';
             return;
         }
 
@@ -597,16 +635,42 @@ const MonitoringDashboard = {
                 'CRITICAL': 'bg-danger',
                 'HIGH': 'bg-danger',
                 'MEDIUM': 'bg-warning',
-                'LOW': 'bg-info'
+                'LOW': 'bg-info',
+                'NORMAL': 'bg-success'
             }[event.severity] || 'bg-secondary';
+
+            // AI Analysis badge
+            let aiBadge = '';
+            if (event.ai_analyzed) {
+                const aiConfidence = event.ai_confidence ? Math.round(event.ai_confidence * 100) : 0;
+                const aiClass = event.is_false_positive ? 'bg-success' : 'bg-primary';
+                const aiIcon = event.is_false_positive ? 'check-circle' : 'robot';
+                const aiTitle = event.ai_explanation || event.ai_classification || 'AI Analyzed';
+                aiBadge = `<span class="badge ${aiClass} ms-1" title="${aiTitle}"><i class="bi bi-${aiIcon}"></i> AI ${aiConfidence}%</span>`;
+                
+                // Show MITRE techniques if available
+                if (event.mitre_techniques && event.mitre_techniques.length > 0) {
+                    aiBadge += event.mitre_techniques.map(t => 
+                        `<span class="badge bg-dark ms-1" title="MITRE ATT&CK">${t}</span>`
+                    ).join('');
+                }
+            }
+
+            // False positive indicator
+            const fpBadge = event.is_false_positive 
+                ? '<span class="badge bg-success ms-1" title="AI determined this is safe"><i class="bi bi-shield-check"></i> Safe</span>' 
+                : '';
 
             return `
                 <tr>
                     <td><small>${time}</small></td>
                     <td><small>${event.source}</small></td>
                     <td><small>${event.type}</small></td>
-                    <td><span class="badge ${severityClass}">${event.severity}</span></td>
-                    <td><small>${(event.description || '').substring(0, 50)}</small></td>
+                    <td>
+                        <span class="badge ${severityClass}">${event.severity}</span>
+                        ${aiBadge}${fpBadge}
+                    </td>
+                    <td><small>${(event.description || '').substring(0, 60)}</small></td>
                 </tr>
             `;
         }).join('');

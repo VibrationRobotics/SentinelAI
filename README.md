@@ -387,13 +387,15 @@ SentinelAI/
 ## 📜 Version History
 
 ### v1.4.0 (November 2025) - Complete Security Suite
+- ✨ **AI Analysis for ALL Monitors** - HIGH/CRITICAL events analyzed by GPT-4
 - ✨ **AMSI Integration** - Windows Antimalware Scan Interface monitoring
 - ✨ **ETW Monitoring** - Event Tracing for Windows (Security-Auditing, PowerShell, TaskScheduler)
 - ✨ **Sysmon Integration** - Full Sysmon event parsing (Process, Network, DLL, Registry)
 - ✨ **DLL Injection Detection** - Monitor suspicious DLLs loaded into processes
 - ✨ **PostgreSQL Persistent Storage** - All agents, events, and audit logs in database
 - ✨ **Multi-Agent SaaS** - Multiple agents connect to central dashboard
-- 🔧 25 active security monitors
+- ✨ **Frontend AI Display** - Shows AI badges, MITRE techniques, confidence scores
+- 🔧 25 active security monitors with AI-powered analysis
 - 🔧 Full API for security events (/api/v1/windows/events)
 
 ### v1.3.0 (November 2025) - Advanced Monitoring & Desktop App
