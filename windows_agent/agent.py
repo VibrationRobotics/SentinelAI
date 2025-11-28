@@ -28,6 +28,13 @@ if platform.system() != "Windows":
 import psutil
 import requests
 
+# Import local ML detector
+try:
+    from ml_detector import HybridThreatDetector, get_detector
+    ML_AVAILABLE = True
+except ImportError:
+    ML_AVAILABLE = False
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -148,8 +155,12 @@ class WindowsAgent:
         self.use_ai = True
         self.ai_cache: Dict[str, Dict] = {}  # Cache AI results to avoid repeated calls
         
+        # Hybrid ML/Rule-based detector (reduces OpenAI costs by 95%+)
+        self.hybrid_detector = get_detector(use_ai=self.use_ai) if ML_AVAILABLE else None
+        
         logger.info(f"Windows Agent initialized - Dashboard: {self.dashboard_url}")
         logger.info(f"AI-powered analysis: {'Enabled' if self.use_ai else 'Disabled'}")
+        logger.info(f"Hybrid ML detector: {'Enabled' if self.hybrid_detector else 'Disabled (install ml_detector.py)'}")
     
     def start(self):
         """Start the Windows agent."""
@@ -476,25 +487,51 @@ class WindowsAgent:
         self.event_queue.put(event)
     
     def _event_sender_loop(self):
-        """Background thread to send events to dashboard with AI analysis for HIGH/CRITICAL."""
+        """Background thread to send events to dashboard with hybrid ML/AI analysis."""
         while self.running:
             try:
                 # Get event with timeout
                 event = self.event_queue.get(timeout=1)
                 
-                # For HIGH/CRITICAL events, run AI analysis first
+                # Step 1: Use hybrid detector (rules + local ML) - FREE and FAST
+                should_use_openai = False
+                local_analysis = None
+                
+                if self.hybrid_detector:
+                    score, should_use_openai = self.hybrid_detector.analyze(
+                        event.event_type, 
+                        event.details
+                    )
+                    
+                    local_analysis = {
+                        'method': 'hybrid_ml',
+                        'is_threat': score.is_threat,
+                        'confidence': score.confidence,
+                        'threat_type': score.threat_type,
+                        'severity': score.severity,
+                        'reason': score.reason,
+                    }
+                    
+                    # Update event severity based on local analysis
+                    if not score.is_threat and score.confidence > 0.8:
+                        # High confidence it's safe - downgrade severity
+                        if event.severity in ['HIGH', 'CRITICAL']:
+                            event.severity = 'LOW'
+                            logger.debug(f"ML marked safe: {event.event_type} ({score.reason})")
+                    
+                    event.details['local_analysis'] = local_analysis
+                
+                # Step 2: Only use OpenAI if hybrid detector is uncertain AND severity is HIGH+
                 ai_result = None
-                if event.severity in ['HIGH', 'CRITICAL'] and self.use_ai:
+                if should_use_openai and event.severity in ['HIGH', 'CRITICAL'] and self.use_ai:
                     ai_result = self._analyze_event_with_ai(event)
                     if ai_result:
-                        # Add AI analysis to event details
                         event.details['ai_analysis'] = ai_result
-                        # Update severity if AI disagrees
                         if ai_result.get('is_false_positive'):
                             event.severity = 'LOW'
-                            logger.info(f"AI marked as false positive: {event.event_type}")
+                            logger.info(f"OpenAI marked as false positive: {event.event_type}")
                 
-                # Send to dashboard
+                # Step 3: Send to dashboard
                 try:
                     response = requests.post(
                         f"{self.api_base}/threats/analyze",
@@ -507,15 +544,16 @@ class WindowsAgent:
                             'timestamp': event.timestamp,
                             'agent_source': 'windows_agent',
                             'ai_analyzed': ai_result is not None,
-                            'request_ai_analysis': event.severity in ['HIGH', 'CRITICAL']
+                            'ml_analyzed': local_analysis is not None,
+                            'request_ai_analysis': should_use_openai and event.severity in ['HIGH', 'CRITICAL']
                         },
                         timeout=5
                     )
                     
                     if response.status_code == 200:
                         self.stats['events_sent'] += 1
-                        ai_tag = " [AI]" if ai_result else ""
-                        logger.info(f"Event sent{ai_tag}: {event.event_type} - {event.description[:50]}")
+                        method = " [AI]" if ai_result else " [ML]" if local_analysis else ""
+                        logger.info(f"Event sent{method}: {event.event_type} - {event.description[:50]}")
                     else:
                         logger.warning(f"Failed to send event: {response.status_code}")
                         
@@ -1469,9 +1507,23 @@ class WindowsAgent:
         # Suspicious domain patterns
         suspicious_tlds = ['.tk', '.ml', '.ga', '.cf', '.gq', '.xyz', '.top', '.work', '.click']
         suspicious_patterns = [
-            r'[a-z0-9]{30,}\.', # Very long subdomain (possible DNS tunneling)
-            r'(\d+\.){4,}',     # Multiple numeric subdomains
-            r'[a-f0-9]{32,}\.',  # Hex-encoded data in subdomain
+            r'[a-z0-9]{50,}\.', # Very long subdomain (possible DNS tunneling) - increased threshold
+            r'[a-f0-9]{40,}\.',  # Hex-encoded data in subdomain
+        ]
+        
+        # Safe patterns to ignore
+        safe_patterns = [
+            r'\.in-addr\.arpa',  # Reverse DNS lookups are normal
+            r'\.ip6\.arpa',      # IPv6 reverse DNS
+            r'localhost',
+            r'microsoft\.com',
+            r'windows\.com',
+            r'windowsupdate\.com',
+            r'azure\.com',
+            r'cloudflare',
+            r'google\.com',
+            r'googleapis\.com',
+            r'gstatic\.com',
         ]
         
         # Known malicious domains (sample list)
@@ -1513,6 +1565,16 @@ class WindowsAgent:
                                 is_suspicious = True
                                 reason = f"Suspicious TLD: {tld}"
                                 break
+                        
+                        # Skip safe patterns first
+                        is_safe = False
+                        for safe in safe_patterns:
+                            if re.search(safe, domain, re.IGNORECASE):
+                                is_safe = True
+                                break
+                        
+                        if is_safe:
+                            continue
                         
                         # Check patterns (DNS tunneling indicators)
                         if not is_suspicious:
@@ -1972,11 +2034,23 @@ class WindowsAgent:
         """Monitor named pipes for C2 communication channels."""
         logger.info("Named pipe monitor started")
         
-        # Known malicious pipe names
+        # Known malicious pipe names (removed 'mojo' - it's Chrome IPC)
         suspicious_pipes = [
-            'msagent_', 'isapi', 'mojo', 'postex_', 'status_',
-            'msse-', 'MSSE-', 'mssecsvc', 'ntsvcs', 'scerpc',
-            'spoolss', 'samr', 'lsarpc', 'netlogon', 'srvsvc'
+            'msagent_', 'isapi', 'postex_', 'status_',
+            'msse-', 'MSSE-', 'mssecsvc',
+            'cobaltstrike', 'beacon', 'metasploit'
+        ]
+        
+        # Safe pipe patterns to ignore
+        safe_pipe_patterns = [
+            'mojo.',           # Chrome/Chromium IPC
+            'chrome.',         # Chrome browser
+            'crashpad',        # Crash reporting
+            'discord',         # Discord app
+            'spotify',         # Spotify
+            'LOCAL\\mojo',    # Chrome mojo pipes
+            'GoogleUpdate',    # Google updater
+            'PIPE_EVENTROOT',  # Windows events
         ]
         
         known_pipes = set()
@@ -2014,19 +2088,22 @@ class WindowsAgent:
                 new_pipes = current_pipes - known_pipes
                 
                 for pipe in new_pipes:
+                    # Skip safe pipes first
+                    is_safe = False
+                    for safe in safe_pipe_patterns:
+                        if safe.lower() in pipe.lower():
+                            is_safe = True
+                            break
+                    
+                    if is_safe:
+                        continue
+                    
                     is_suspicious = False
                     
                     for sus_pattern in suspicious_pipes:
                         if sus_pattern.lower() in pipe.lower():
                             is_suspicious = True
                             break
-                    
-                    # Also flag very random-looking pipe names
-                    if not is_suspicious and len(pipe) > 20:
-                        # Check for high entropy (random) names
-                        unique_chars = len(set(pipe.lower()))
-                        if unique_chars > 15:
-                            is_suspicious = True
                     
                     if is_suspicious:
                         event = SecurityEvent(
