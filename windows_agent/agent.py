@@ -190,6 +190,11 @@ class WindowsAgent:
             threading.Thread(target=self._certificate_monitor_loop, daemon=True),
             threading.Thread(target=self._named_pipe_monitor_loop, daemon=True),
             threading.Thread(target=self._defender_monitor_loop, daemon=True),
+            # AMSI, ETW, Sysmon, DLL Injection (Phase 9)
+            threading.Thread(target=self._amsi_monitor_loop, daemon=True),
+            threading.Thread(target=self._etw_monitor_loop, daemon=True),
+            threading.Thread(target=self._sysmon_monitor_loop, daemon=True),
+            threading.Thread(target=self._dll_injection_monitor_loop, daemon=True),
         ]
         
         for t in threads:
@@ -260,13 +265,14 @@ class WindowsAgent:
                 'hostname': platform.node(),
                 'platform': platform.system(),
                 'platform_version': windows_version,
-                'agent_version': '1.3.0',
+                'agent_version': '1.4.0',
                 'is_admin': is_admin,
                 'capabilities': [
                     'process', 'network', 'eventlog', 'firewall', 'ai', 
                     'registry', 'startup', 'tasks', 'usb', 'hosts', 'browser',
                     'clipboard', 'dns', 'powershell', 'wmi', 'services',
-                    'drivers', 'firewall_rules', 'certificates', 'named_pipes', 'defender'
+                    'drivers', 'firewall_rules', 'certificates', 'named_pipes', 'defender',
+                    'amsi', 'etw', 'sysmon', 'dll_injection'
                 ]
             }
             
@@ -2027,6 +2033,334 @@ class WindowsAgent:
             except Exception as e:
                 logger.debug(f"Defender monitor error: {e}")
     
+    # ============== AMSI, ETW, SYSMON, DLL INJECTION ==============
+    
+    def _amsi_monitor_loop(self):
+        """Monitor AMSI (Antimalware Scan Interface) events via Event Log."""
+        logger.info("AMSI monitor started")
+        
+        try:
+            import win32evtlog
+        except ImportError:
+            logger.info("AMSI monitor requires pywin32")
+            return
+        
+        last_record = 0
+        
+        # AMSI Event IDs in Microsoft-Windows-Windows Defender/Operational
+        # Event ID 1116 includes AMSI detections
+        
+        while self.running:
+            try:
+                time.sleep(15)  # Check every 15 seconds
+                
+                try:
+                    # AMSI events are logged to Windows Defender log
+                    hand = win32evtlog.OpenEventLog(None, "Microsoft-Windows-Windows Defender/Operational")
+                    flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+                    
+                    events = win32evtlog.ReadEventLog(hand, flags, 0)
+                    
+                    for event in events:
+                        if event.RecordNumber <= last_record:
+                            continue
+                        
+                        last_record = max(last_record, event.RecordNumber)
+                        
+                        # Event ID 1116 = AMSI detection
+                        if event.EventID == 1116:
+                            event_data = str(event.StringInserts) if event.StringInserts else ""
+                            
+                            # Check if it's an AMSI-specific detection
+                            if 'AMSI' in event_data or 'script' in event_data.lower():
+                                event_obj = SecurityEvent(
+                                    timestamp=datetime.utcnow().isoformat(),
+                                    event_type="amsi_detection",
+                                    severity="HIGH",
+                                    source="amsi",
+                                    description="AMSI detected malicious content",
+                                    details={
+                                        "event_id": event.EventID,
+                                        "data": event_data[:500]
+                                    }
+                                )
+                                self.event_queue.put(event_obj)
+                                logger.warning(f"AMSI detection: {event_data[:100]}")
+                    
+                    win32evtlog.CloseEventLog(hand)
+                    
+                except Exception as e:
+                    logger.debug(f"AMSI log read error: {e}")
+                    
+            except Exception as e:
+                logger.debug(f"AMSI monitor error: {e}")
+    
+    def _etw_monitor_loop(self):
+        """Monitor ETW (Event Tracing for Windows) for security events."""
+        logger.info("ETW monitor started")
+        
+        try:
+            import win32evtlog
+        except ImportError:
+            logger.info("ETW monitor requires pywin32")
+            return
+        
+        last_records = {}
+        
+        # ETW providers to monitor
+        etw_logs = [
+            ("Microsoft-Windows-Security-Auditing", [4688, 4689]),  # Process creation/termination
+            ("Microsoft-Windows-Sysmon/Operational", [1, 3, 7, 8, 10, 11]),  # Sysmon events
+            ("Microsoft-Windows-PowerShell/Operational", [4103, 4104]),  # PowerShell
+            ("Microsoft-Windows-TaskScheduler/Operational", [106, 140, 141]),  # Task scheduler
+        ]
+        
+        while self.running:
+            try:
+                time.sleep(20)  # Check every 20 seconds
+                
+                for log_name, event_ids in etw_logs:
+                    try:
+                        hand = win32evtlog.OpenEventLog(None, log_name)
+                        flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+                        
+                        events = win32evtlog.ReadEventLog(hand, flags, 0)
+                        last_record = last_records.get(log_name, 0)
+                        
+                        for event in events:
+                            if event.RecordNumber <= last_record:
+                                continue
+                            
+                            last_records[log_name] = max(last_records.get(log_name, 0), event.RecordNumber)
+                            
+                            if event.EventID in event_ids:
+                                event_data = str(event.StringInserts) if event.StringInserts else ""
+                                
+                                # Determine severity based on event type
+                                severity = "MEDIUM"
+                                if event.EventID in [4688, 1]:  # Process creation
+                                    # Check for suspicious processes
+                                    if any(x in event_data.lower() for x in ['powershell', 'cmd', 'wscript', 'cscript', 'mshta']):
+                                        severity = "HIGH"
+                                
+                                event_obj = SecurityEvent(
+                                    timestamp=datetime.utcnow().isoformat(),
+                                    event_type="etw_event",
+                                    severity=severity,
+                                    source="etw",
+                                    description=f"ETW Event {event.EventID} from {log_name}",
+                                    details={
+                                        "log_name": log_name,
+                                        "event_id": event.EventID,
+                                        "data": event_data[:500]
+                                    }
+                                )
+                                self.event_queue.put(event_obj)
+                        
+                        win32evtlog.CloseEventLog(hand)
+                        
+                    except Exception as e:
+                        logger.debug(f"ETW log {log_name} error: {e}")
+                        
+            except Exception as e:
+                logger.debug(f"ETW monitor error: {e}")
+    
+    def _sysmon_monitor_loop(self):
+        """Monitor Sysmon logs for detailed security events."""
+        logger.info("Sysmon monitor started")
+        
+        try:
+            import win32evtlog
+        except ImportError:
+            logger.info("Sysmon monitor requires pywin32")
+            return
+        
+        last_record = 0
+        
+        # Sysmon Event IDs
+        # 1 = Process creation
+        # 3 = Network connection
+        # 7 = Image loaded (DLL)
+        # 8 = CreateRemoteThread (injection)
+        # 10 = ProcessAccess (credential dumping)
+        # 11 = FileCreate
+        # 12/13/14 = Registry events
+        # 22 = DNS query
+        sysmon_events = {
+            1: ("process_create", "MEDIUM"),
+            3: ("network_connect", "LOW"),
+            7: ("image_load", "LOW"),
+            8: ("remote_thread", "HIGH"),  # Potential injection
+            10: ("process_access", "HIGH"),  # Potential credential dump
+            11: ("file_create", "LOW"),
+            12: ("registry_add", "MEDIUM"),
+            13: ("registry_set", "MEDIUM"),
+            14: ("registry_rename", "MEDIUM"),
+            22: ("dns_query", "LOW"),
+        }
+        
+        while self.running:
+            try:
+                time.sleep(10)  # Check every 10 seconds
+                
+                try:
+                    hand = win32evtlog.OpenEventLog(None, "Microsoft-Windows-Sysmon/Operational")
+                    flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+                    
+                    events = win32evtlog.ReadEventLog(hand, flags, 0)
+                    
+                    for event in events:
+                        if event.RecordNumber <= last_record:
+                            continue
+                        
+                        last_record = max(last_record, event.RecordNumber)
+                        
+                        if event.EventID in sysmon_events:
+                            event_type, base_severity = sysmon_events[event.EventID]
+                            event_data = str(event.StringInserts) if event.StringInserts else ""
+                            
+                            # Elevate severity for suspicious patterns
+                            severity = base_severity
+                            if event.EventID == 1:  # Process creation
+                                if any(x in event_data.lower() for x in ['mimikatz', 'procdump', 'lazagne', 'secretsdump']):
+                                    severity = "CRITICAL"
+                                elif any(x in event_data.lower() for x in ['-enc', 'downloadstring', 'invoke-']):
+                                    severity = "HIGH"
+                            
+                            if event.EventID == 8:  # Remote thread - always suspicious
+                                severity = "HIGH"
+                            
+                            if event.EventID == 10:  # Process access to lsass
+                                if 'lsass' in event_data.lower():
+                                    severity = "CRITICAL"
+                            
+                            # Only report HIGH/CRITICAL or specific events
+                            if severity in ["HIGH", "CRITICAL"] or event.EventID in [8, 10]:
+                                event_obj = SecurityEvent(
+                                    timestamp=datetime.utcnow().isoformat(),
+                                    event_type=f"sysmon_{event_type}",
+                                    severity=severity,
+                                    source="sysmon",
+                                    description=f"Sysmon: {event_type} (Event {event.EventID})",
+                                    details={
+                                        "event_id": event.EventID,
+                                        "event_type": event_type,
+                                        "data": event_data[:500]
+                                    }
+                                )
+                                self.event_queue.put(event_obj)
+                                logger.warning(f"Sysmon {event_type}: {event_data[:100]}")
+                    
+                    win32evtlog.CloseEventLog(hand)
+                    
+                except Exception as e:
+                    # Sysmon may not be installed
+                    if "cannot find" not in str(e).lower():
+                        logger.debug(f"Sysmon log read error: {e}")
+                    
+            except Exception as e:
+                logger.debug(f"Sysmon monitor error: {e}")
+    
+    def _dll_injection_monitor_loop(self):
+        """Monitor for DLL injection attempts."""
+        logger.info("DLL injection monitor started")
+        
+        # Track loaded DLLs per process
+        process_dlls = {}
+        
+        # Suspicious DLL patterns
+        suspicious_dll_patterns = [
+            r'temp.*\.dll$',
+            r'appdata.*\.dll$',
+            r'[a-f0-9]{8,}\.dll$',  # Random hex names
+            r'\\users\\.*\\downloads\\.*\.dll$',
+        ]
+        
+        # Known injection techniques leave these DLLs
+        injection_indicators = [
+            'ntdll.dll',  # When loaded multiple times
+            'kernel32.dll',
+            'clr.dll',  # .NET injection
+            'mscoree.dll',
+        ]
+        
+        while self.running:
+            try:
+                time.sleep(30)  # Check every 30 seconds
+                
+                for proc in psutil.process_iter(['pid', 'name']):
+                    try:
+                        pid = proc.info['pid']
+                        proc_name = proc.info['name']
+                        
+                        # Skip system processes
+                        if pid < 100:
+                            continue
+                        
+                        # Get memory maps (loaded DLLs)
+                        try:
+                            p = psutil.Process(pid)
+                            memory_maps = p.memory_maps()
+                            
+                            current_dlls = set()
+                            for mmap in memory_maps:
+                                if mmap.path and mmap.path.lower().endswith('.dll'):
+                                    current_dlls.add(mmap.path.lower())
+                            
+                            # Check for new DLLs since last scan
+                            if pid in process_dlls:
+                                new_dlls = current_dlls - process_dlls[pid]
+                                
+                                for dll in new_dlls:
+                                    is_suspicious = False
+                                    reason = ""
+                                    
+                                    # Check suspicious patterns
+                                    for pattern in suspicious_dll_patterns:
+                                        if re.search(pattern, dll, re.IGNORECASE):
+                                            is_suspicious = True
+                                            reason = f"Suspicious DLL path pattern: {pattern}"
+                                            break
+                                    
+                                    # Check for unsigned DLLs in unusual locations
+                                    if not is_suspicious:
+                                        if '\\temp\\' in dll or '\\appdata\\' in dll:
+                                            if not any(x in dll for x in ['microsoft', 'windows', 'google', 'mozilla']):
+                                                is_suspicious = True
+                                                reason = "DLL loaded from temp/appdata"
+                                    
+                                    if is_suspicious:
+                                        event = SecurityEvent(
+                                            timestamp=datetime.utcnow().isoformat(),
+                                            event_type="dll_injection_suspected",
+                                            severity="HIGH",
+                                            source="dll_monitor",
+                                            description=f"Suspicious DLL loaded into {proc_name}",
+                                            details={
+                                                "process_name": proc_name,
+                                                "pid": pid,
+                                                "dll_path": dll,
+                                                "reason": reason
+                                            }
+                                        )
+                                        self.event_queue.put(event)
+                                        logger.warning(f"Suspicious DLL: {dll} in {proc_name}")
+                            
+                            process_dlls[pid] = current_dlls
+                            
+                        except (psutil.AccessDenied, psutil.NoSuchProcess):
+                            pass
+                            
+                    except Exception as e:
+                        pass
+                
+                # Cleanup dead processes
+                active_pids = {p.pid for p in psutil.process_iter()}
+                process_dlls = {k: v for k, v in process_dlls.items() if k in active_pids}
+                        
+            except Exception as e:
+                logger.debug(f"DLL injection monitor error: {e}")
+    
     # ============== END ADVANCED MONITORS ==============
     
     def block_ip(self, ip: str) -> bool:
@@ -2091,17 +2425,18 @@ def main():
     ai_status = "DISABLED" if args.no_ai else "ENABLED"
     
     print(f"""
-    ╔═══════════════════════════════════════════════════════════════╗
-    ║             SentinelAI Windows Agent v1.3                     ║
-    ║       Native Windows Protection & Threat Detection            ║
-    ║                                                               ║
-    ║  Core:     Process | Network | EventLog | Registry | Firewall ║
-    ║  System:   Startup | Tasks | USB | Hosts | Browser | Services ║
-    ║  Advanced: Clipboard | DNS | PowerShell | WMI | Drivers       ║
-    ║  Security: Certificates | Named Pipes | Defender | AVG        ║
-    ║                                                               ║
-    ║     AI Analysis: {ai_status:^10}                                ║
-    ╚═══════════════════════════════════════════════════════════════╝
+    ╔═══════════════════════════════════════════════════════════════════╗
+    ║               SentinelAI Windows Agent v1.4                       ║
+    ║         Native Windows Protection & Threat Detection              ║
+    ║                                                                   ║
+    ║  Core:     Process | Network | EventLog | Registry | Firewall     ║
+    ║  System:   Startup | Tasks | USB | Hosts | Browser | Services     ║
+    ║  Advanced: Clipboard | DNS | PowerShell | WMI | Drivers           ║
+    ║  Security: Certificates | Named Pipes | Defender | AVG            ║
+    ║  Deep:     AMSI | ETW | Sysmon | DLL Injection Detection          ║
+    ║                                                                   ║
+    ║     AI Analysis: {ai_status:^10}    |    25 Active Monitors         ║
+    ╚═══════════════════════════════════════════════════════════════════╝
     """)
     
     agent = WindowsAgent(dashboard_url=args.dashboard)

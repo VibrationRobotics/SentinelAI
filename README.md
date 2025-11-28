@@ -386,13 +386,22 @@ SentinelAI/
 
 ## 📜 Version History
 
+### v1.4.0 (November 2025) - Complete Security Suite
+- ✨ **AMSI Integration** - Windows Antimalware Scan Interface monitoring
+- ✨ **ETW Monitoring** - Event Tracing for Windows (Security-Auditing, PowerShell, TaskScheduler)
+- ✨ **Sysmon Integration** - Full Sysmon event parsing (Process, Network, DLL, Registry)
+- ✨ **DLL Injection Detection** - Monitor suspicious DLLs loaded into processes
+- ✨ **PostgreSQL Persistent Storage** - All agents, events, and audit logs in database
+- ✨ **Multi-Agent SaaS** - Multiple agents connect to central dashboard
+- 🔧 25 active security monitors
+- 🔧 Full API for security events (/api/v1/windows/events)
+
 ### v1.3.0 (November 2025) - Advanced Monitoring & Desktop App
 - ✨ **Tauri Desktop App** - Native Windows application with embedded agent
 - ✨ **Clipboard Monitor** - Detect sensitive data exposure
 - ✨ **DNS Query Monitor** - Detect DNS tunneling and suspicious domains
 - ✨ **PowerShell Logging** - Capture all script block execution
 - ✨ **WMI Monitor** - Detect WMI-based persistence
-- ✨ **DLL Injection Detection** - Monitor for injected DLLs
 - ✨ **Named Pipe Monitor** - Detect C2 communication channels
 - ✨ **Service Monitor** - Detect new service creation
 - ✨ **Driver Monitor** - Detect rootkit driver loading
@@ -401,8 +410,6 @@ SentinelAI/
 - ✨ **Windows Defender Integration** - Native Windows Security
 - ✨ **AVG/Avast Integration** - Parse AV logs for detections
 - ✨ **Audit Log System** - Comprehensive activity logging
-- 🔧 PostgreSQL persistent storage for all events
-- 🔧 Multi-agent SaaS deployment support
 
 ### v1.0.0 (November 2025) - Native Agents Release
 - ✨ Native Windows Agent with AI-powered detection

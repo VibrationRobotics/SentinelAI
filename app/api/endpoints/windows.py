@@ -1,22 +1,23 @@
 """
 Windows Integration API endpoints for SentinelAI.
 Provides native Windows firewall and system control.
+Uses PostgreSQL for persistent storage.
 """
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import desc, select, update
 import logging
 
 from app.services.windows_firewall import get_windows_firewall, FirewallRule
+from app.db.base import get_session
+from app.db.models import Agent, SecurityEvent, BlockedIP, AuditLog
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-# Store registered agents
-_registered_agents: Dict[str, Dict[str, Any]] = {}
-_agent_events: List[Dict[str, Any]] = []
 
 
 class BlockIPRequest(BaseModel):
@@ -278,31 +279,63 @@ class AgentRegistration(BaseModel):
 
 
 @router.post("/agent/register")
-async def register_agent(registration: AgentRegistration) -> JSONResponse:
-    """Register a Windows agent with the dashboard."""
+async def register_agent(registration: AgentRegistration, db: AsyncSession = Depends(get_session)) -> JSONResponse:
+    """Register a Windows agent with the dashboard (PostgreSQL persistent storage)."""
     try:
-        agent_id = registration.hostname
+        # Check if agent already exists
+        result = await db.execute(select(Agent).filter(Agent.hostname == registration.hostname))
+        existing_agent = result.scalar_one_or_none()
         
-        _registered_agents[agent_id] = {
-            "hostname": registration.hostname,
-            "platform": registration.platform,
-            "platform_version": registration.platform_version,
-            "agent_version": registration.agent_version,
-            "capabilities": registration.capabilities,
-            "is_admin": registration.is_admin,
-            "registered_at": datetime.utcnow().isoformat(),
-            "last_seen": datetime.utcnow().isoformat(),
-            "status": "online"
-        }
+        if existing_agent:
+            # Update existing agent
+            existing_agent.platform = registration.platform
+            existing_agent.platform_version = registration.platform_version
+            existing_agent.agent_version = registration.agent_version
+            existing_agent.capabilities = registration.capabilities
+            existing_agent.is_admin = registration.is_admin
+            existing_agent.last_seen = datetime.utcnow()
+            existing_agent.status = "online"
+            await db.commit()
+            agent_id = existing_agent.id
+            logger.info(f"Windows agent updated: {registration.hostname}")
+        else:
+            # Create new agent
+            new_agent = Agent(
+                hostname=registration.hostname,
+                platform=registration.platform,
+                platform_version=registration.platform_version,
+                agent_version=registration.agent_version,
+                capabilities=registration.capabilities,
+                is_admin=registration.is_admin,
+                registered_at=datetime.utcnow(),
+                last_seen=datetime.utcnow(),
+                status="online"
+            )
+            db.add(new_agent)
+            await db.commit()
+            await db.refresh(new_agent)
+            agent_id = new_agent.id
+            logger.info(f"Windows agent registered: {registration.hostname}")
         
-        logger.info(f"Windows agent registered: {agent_id}")
+        # Log to audit
+        audit_log = AuditLog(
+            source="agent",
+            action="agent_registered",
+            severity="INFO",
+            description=f"Agent {registration.hostname} registered/updated",
+            hostname=registration.hostname,
+            details={"agent_version": registration.agent_version, "capabilities": registration.capabilities}
+        )
+        db.add(audit_log)
+        await db.commit()
         
         return JSONResponse(
             status_code=status.HTTP_200_OK,
-            content={"success": True, "agent_id": agent_id}
+            content={"success": True, "agent_id": str(agent_id)}
         )
     except Exception as e:
         logger.error(f"Error registering agent: {e}")
+        await db.rollback()
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"error": str(e)}
@@ -310,37 +343,223 @@ async def register_agent(registration: AgentRegistration) -> JSONResponse:
 
 
 @router.get("/agent/list")
-async def list_agents() -> JSONResponse:
-    """List all registered Windows agents."""
-    return JSONResponse(
-        status_code=status.HTTP_200_OK,
-        content={
-            "agents": list(_registered_agents.values()),
-            "count": len(_registered_agents)
-        }
-    )
+async def list_agents(db: AsyncSession = Depends(get_session)) -> JSONResponse:
+    """List all registered Windows agents (from PostgreSQL)."""
+    try:
+        # Mark agents as offline if not seen in 2 minutes
+        offline_threshold = datetime.utcnow() - timedelta(minutes=2)
+        await db.execute(
+            update(Agent).where(Agent.last_seen < offline_threshold).values(status="offline")
+        )
+        await db.commit()
+        
+        result = await db.execute(select(Agent).order_by(desc(Agent.last_seen)))
+        agents = result.scalars().all()
+        
+        agent_list = []
+        for agent in agents:
+            agent_list.append({
+                "id": agent.id,
+                "hostname": agent.hostname,
+                "platform": agent.platform,
+                "platform_version": agent.platform_version,
+                "agent_version": agent.agent_version,
+                "capabilities": agent.capabilities,
+                "is_admin": agent.is_admin,
+                "registered_at": agent.registered_at.isoformat() if agent.registered_at else None,
+                "last_seen": agent.last_seen.isoformat() if agent.last_seen else None,
+                "status": agent.status,
+                "ip_address": agent.ip_address
+            })
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"agents": agent_list, "count": len(agent_list)}
+        )
+    except Exception as e:
+        logger.error(f"Error listing agents: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": str(e)}
+        )
 
 
 @router.get("/agent/{agent_id}/status")
-async def get_agent_status(agent_id: str) -> JSONResponse:
-    """Get status of a specific agent."""
-    if agent_id not in _registered_agents:
+async def get_agent_status(agent_id: str, db: AsyncSession = Depends(get_session)) -> JSONResponse:
+    """Get status of a specific agent (from PostgreSQL)."""
+    try:
+        # Try to find by hostname or id
+        if agent_id.isdigit():
+            result = await db.execute(select(Agent).filter((Agent.hostname == agent_id) | (Agent.id == int(agent_id))))
+        else:
+            result = await db.execute(select(Agent).filter(Agent.hostname == agent_id))
+        agent = result.scalar_one_or_none()
+        
+        if not agent:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content={"error": "Agent not found"}
+            )
+        
         return JSONResponse(
-            status_code=status.HTTP_404_NOT_FOUND,
-            content={"error": "Agent not found"}
+            status_code=status.HTTP_200_OK,
+            content={
+                "id": agent.id,
+                "hostname": agent.hostname,
+                "platform": agent.platform,
+                "platform_version": agent.platform_version,
+                "agent_version": agent.agent_version,
+                "capabilities": agent.capabilities,
+                "is_admin": agent.is_admin,
+                "registered_at": agent.registered_at.isoformat() if agent.registered_at else None,
+                "last_seen": agent.last_seen.isoformat() if agent.last_seen else None,
+                "status": agent.status
+            }
         )
-    
-    return JSONResponse(
-        status_code=status.HTTP_200_OK,
-        content=_registered_agents[agent_id]
-    )
+    except Exception as e:
+        logger.error(f"Error getting agent status: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": str(e)}
+        )
 
 
 @router.post("/agent/heartbeat")
-async def agent_heartbeat(hostname: str) -> JSONResponse:
-    """Update agent heartbeat."""
-    if hostname in _registered_agents:
-        _registered_agents[hostname]["last_seen"] = datetime.utcnow().isoformat()
-        _registered_agents[hostname]["status"] = "online"
-    
-    return JSONResponse(status_code=status.HTTP_200_OK, content={"success": True})
+async def agent_heartbeat(hostname: str, db: AsyncSession = Depends(get_session)) -> JSONResponse:
+    """Update agent heartbeat (PostgreSQL persistent)."""
+    try:
+        result = await db.execute(select(Agent).filter(Agent.hostname == hostname))
+        agent = result.scalar_one_or_none()
+        if agent:
+            agent.last_seen = datetime.utcnow()
+            agent.status = "online"
+            await db.commit()
+        
+        return JSONResponse(status_code=status.HTTP_200_OK, content={"success": True})
+    except Exception as e:
+        logger.error(f"Error updating heartbeat: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": str(e)}
+        )
+
+
+@router.post("/agent/event")
+async def receive_agent_event(event_data: Dict[str, Any], db: AsyncSession = Depends(get_session)) -> JSONResponse:
+    """Receive and store security event from agent (PostgreSQL persistent)."""
+    try:
+        # Find agent
+        hostname = event_data.get("hostname", "unknown")
+        result = await db.execute(select(Agent).filter(Agent.hostname == hostname))
+        agent = result.scalar_one_or_none()
+        
+        if not agent:
+            # Auto-register agent if not found
+            agent = Agent(
+                hostname=hostname,
+                platform=event_data.get("platform", "Unknown"),
+                platform_version="",
+                agent_version="1.0.0",
+                capabilities=[],
+                status="online"
+            )
+            db.add(agent)
+            await db.commit()
+            await db.refresh(agent)
+        
+        # Create security event
+        security_event = SecurityEvent(
+            agent_id=agent.id,
+            event_type=event_data.get("event_type", "unknown"),
+            severity=event_data.get("severity", "LOW"),
+            description=event_data.get("description", ""),
+            details=event_data.get("details", {}),
+            source_ip=event_data.get("source_ip"),
+            destination_ip=event_data.get("destination_ip"),
+            process_name=event_data.get("process_name"),
+            is_threat=event_data.get("severity", "LOW") in ["HIGH", "CRITICAL"]
+        )
+        db.add(security_event)
+        
+        # Also log to audit
+        audit_log = AuditLog(
+            source="agent",
+            action="security_event",
+            severity=event_data.get("severity", "INFO"),
+            description=event_data.get("description", "Security event received"),
+            hostname=hostname,
+            details=event_data.get("details", {})
+        )
+        db.add(audit_log)
+        
+        await db.commit()
+        
+        logger.info(f"Security event stored: {event_data.get('event_type')} from {hostname}")
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"success": True, "event_id": security_event.id}
+        )
+    except Exception as e:
+        logger.error(f"Error storing event: {e}")
+        await db.rollback()
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": str(e)}
+        )
+
+
+@router.get("/events")
+async def get_security_events(
+    limit: int = 100,
+    severity: Optional[str] = None,
+    event_type: Optional[str] = None,
+    hostname: Optional[str] = None,
+    db: AsyncSession = Depends(get_session)
+) -> JSONResponse:
+    """Get security events from PostgreSQL database."""
+    try:
+        query = select(SecurityEvent).join(Agent)
+        
+        if severity:
+            query = query.filter(SecurityEvent.severity == severity.upper())
+        if event_type:
+            query = query.filter(SecurityEvent.event_type == event_type)
+        if hostname:
+            query = query.filter(Agent.hostname == hostname)
+        
+        query = query.order_by(desc(SecurityEvent.timestamp)).limit(limit)
+        result = await db.execute(query)
+        events = result.scalars().all()
+        
+        event_list = []
+        for event in events:
+            # Need to load agent relationship
+            agent_result = await db.execute(select(Agent).filter(Agent.id == event.agent_id))
+            agent = agent_result.scalar_one_or_none()
+            
+            event_list.append({
+                "id": event.id,
+                "agent_id": event.agent_id,
+                "hostname": agent.hostname if agent else "unknown",
+                "event_type": event.event_type,
+                "severity": event.severity,
+                "timestamp": event.timestamp.isoformat() if event.timestamp else None,
+                "description": event.description,
+                "details": event.details,
+                "source_ip": event.source_ip,
+                "destination_ip": event.destination_ip,
+                "process_name": event.process_name,
+                "is_threat": event.is_threat
+            })
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"events": event_list, "count": len(event_list)}
+        )
+    except Exception as e:
+        logger.error(f"Error getting events: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": str(e)}
+        )
