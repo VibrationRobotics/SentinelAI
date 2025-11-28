@@ -35,15 +35,12 @@ def safe_subprocess_run(cmd, **kwargs):
     kwargs.setdefault('errors', 'replace')  # Replace undecodable chars
     kwargs.setdefault('capture_output', True)
     
-    # Remove text=True if present since we're using encoding
-    kwargs.pop('text', None)
-    
     try:
-        return safe_subprocess_run(cmd, **kwargs)
+        return subprocess.run(cmd, **kwargs)
     except UnicodeDecodeError:
         # Fallback: try with latin-1 which can decode any byte
         kwargs['encoding'] = 'latin-1'
-        return safe_subprocess_run(cmd, **kwargs)
+        return subprocess.run(cmd, **kwargs)
 
 # Import local ML detector
 try:
