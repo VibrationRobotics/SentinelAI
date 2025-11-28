@@ -75,13 +75,26 @@ class LocalOpenAIService:
                 messages=[
                     {
                         "role": "system",
-                        "content": """You are an expert cybersecurity analyst AI. Analyze threats and provide:
-1. Severity assessment (HIGH, MEDIUM, LOW, NORMAL)
-2. Threat type classification
-3. Detailed description of the threat
-4. MITRE ATT&CK techniques if applicable
-5. Specific remediation steps that can be automated
-6. Risk score (0-100)
+                        "content": """You are an expert cybersecurity analyst AI for SentinelAI, a threat detection system.
+
+IMPORTANT CONTEXT - NORMAL WINDOWS EVENTS (NOT THREATS):
+- Event ID 4672 (Special privileges assigned) for SYSTEM, LOCAL SERVICE, NETWORK SERVICE accounts is NORMAL
+- Event ID 4624 (Successful logon) for system accounts is NORMAL
+- Event ID 4648 (Explicit credential logon) for scheduled tasks is NORMAL
+- 127.0.0.1 (localhost) traffic is usually internal/safe
+- NT AUTHORITY\\SYSTEM performing privileged operations is NORMAL Windows behavior
+- Services starting with elevated privileges is NORMAL
+
+SENTINELAI AGENT CONTEXT:
+- SentinelAI has Windows and Linux agents that monitor processes, network, and logs
+- Agent processes (python.exe running agent.py) are part of our system
+- Dashboard runs on port 8015
+
+YOUR TASK:
+1. Determine if this is a REAL THREAT or NORMAL SYSTEM ACTIVITY
+2. If NORMAL: Set severity to "NORMAL" or "LOW" and explain why it's safe
+3. If THREAT: Provide severity (HIGH, MEDIUM), threat type, MITRE techniques, and remediation
+4. Risk score: 0-20 for normal activity, 21-50 for suspicious, 51-100 for confirmed threats
 
 Respond in JSON format only."""
                     },
@@ -119,38 +132,51 @@ Respond in JSON format only."""
     
     def _build_analysis_prompt(self, threat_data: Dict[str, Any]) -> str:
         """Build the analysis prompt from threat data."""
-        return f"""Analyze this cybersecurity threat:
+        # Extract payload for better context
+        payload = threat_data.get('payload', 'None')
+        if isinstance(payload, str):
+            try:
+                payload_dict = json.loads(payload)
+                payload = json.dumps(payload_dict, indent=2)
+            except:
+                pass
+        
+        return f"""Analyze this security event and determine if it's a REAL THREAT or NORMAL SYSTEM ACTIVITY:
 
 Source IP: {threat_data.get('source_ip', 'Unknown')}
 Destination IP: {threat_data.get('destination_ip', 'Unknown')}
 Protocol: {threat_data.get('protocol', 'Unknown')}
-Behavior: {threat_data.get('behavior', 'Unknown')}
-Payload: {threat_data.get('payload', 'None')}
-Additional Data: {json.dumps(threat_data.get('additional_data', {}), indent=2)}
+Behavior/Type: {threat_data.get('behavior', threat_data.get('threat_type', 'Unknown'))}
+Description: {threat_data.get('description', 'None')}
+
+PAYLOAD/EVENT DATA:
+{payload}
+
+Additional Context: {json.dumps(threat_data.get('additional_data', {}), indent=2)}
+
+IMPORTANT: Check if this is normal Windows/Linux system activity before classifying as a threat.
+- Windows Event 4672 for SYSTEM account = NORMAL (not a threat)
+- Localhost (127.0.0.1) activity = Usually safe
+- NT AUTHORITY\\SYSTEM = Windows system account (normal)
 
 Provide your analysis in this JSON format:
 {{
-    "severity": "HIGH|MEDIUM|LOW|NORMAL",
-    "threat_type": "type of attack",
-    "description": "detailed description",
-    "mitre_techniques": ["T1234", "T5678"],
+    "severity": "NORMAL|LOW|MEDIUM|HIGH",
+    "threat_type": "normal_system_activity|suspicious_activity|malware|intrusion|etc",
+    "is_false_positive": true/false,
+    "description": "detailed explanation of what this event means",
+    "why_safe_or_dangerous": "explain why this is safe OR why it's dangerous",
+    "mitre_techniques": ["T1234"] or [],
     "risk_score": 0-100,
-    "indicators_of_compromise": ["list of IOCs"],
+    "indicators_of_compromise": [],
     "remediation_steps": [
         {{
-            "action": "block_ip",
-            "target": "source_ip",
-            "description": "Block the malicious IP address",
-            "automated": true
-        }},
-        {{
-            "action": "update_firewall",
-            "rule": "deny from source_ip",
-            "description": "Add firewall rule",
-            "automated": true
+            "action": "no_action_needed|add_to_whitelist|block_ip|kill_process|etc",
+            "description": "what to do",
+            "automated": true/false
         }}
     ],
-    "recommendation": "summary recommendation"
+    "recommendation": "summary - is action needed or can this be safely ignored?"
 }}"""
 
     def generate_fix_script(self, threat_data: Dict[str, Any], fix_action: str) -> Optional[str]:

@@ -90,7 +90,13 @@ function setupNavigation() {
 function loadPage(pageName) {
     console.log('Loading page:', pageName);
     
-    // Show the appropriate content and hide others
+    // Use the showPage function from monitoring.js if available
+    if (typeof showPage === 'function') {
+        showPage(pageName);
+        return;
+    }
+    
+    // Fallback: Show the appropriate content and hide others
     const contentSections = document.querySelectorAll('.content-section');
     contentSections.forEach(section => {
         if (section.id === `${pageName}-content`) {
@@ -106,25 +112,19 @@ function loadPage(pageName) {
             initializeDashboard();
             break;
         case 'threats':
-            initializeThreatsPage();
+            // Scroll to threats section
+            const threatList = document.getElementById('threat-list');
+            if (threatList) threatList.scrollIntoView({ behavior: 'smooth' });
+            fetchThreats();
             break;
-        case 'ai-services':
-            initializeAIServicesPage();
-            break;
-        case 'devices':
-            initializeDevicesPage();
-            break;
-        case 'users':
-            initializeUsersPage();
-            break;
-        case 'settings':
-            initializeSettingsPage();
-            break;
-        case 'reports':
-            initializeReportsPage();
+        case 'agents':
+            // Scroll to agents section
+            const agentsTable = document.getElementById('agents-table');
+            if (agentsTable) agentsTable.scrollIntoView({ behavior: 'smooth' });
             break;
         default:
-            console.warn('Unknown page:', pageName);
+            // For dashboard, just refresh
+            initializeDashboard();
     }
     
     // Update page title
@@ -788,6 +788,37 @@ function showThreatDetails(threatId) {
             `;
         }
         
+        // Add AI Actions section - always show for re-analysis
+        detailsHtml += `
+            <div class="row mb-3">
+                <div class="col-12">
+                    <div class="card border-info">
+                        <div class="card-header bg-info text-white">
+                            <i class="bi bi-cpu"></i> AI Actions
+                        </div>
+                        <div class="card-body">
+                            <div class="d-flex flex-wrap gap-2 mb-3">
+                                <button class="btn btn-primary" onclick="reanalyzeWithAI('${threat.id}')" id="reanalyze-btn-${threat.id}">
+                                    <i class="bi bi-arrow-repeat"></i> Re-analyze with AI
+                                </button>
+                                <button class="btn btn-success" onclick="addToWhitelist('${threat.id}', '${threat.source_ip}')">
+                                    <i class="bi bi-check-circle"></i> Mark as Safe / Whitelist
+                                </button>
+                                <button class="btn btn-outline-secondary" onclick="markAsFalsePositive('${threat.id}')">
+                                    <i class="bi bi-x-circle"></i> False Positive
+                                </button>
+                            </div>
+                            <div id="ai-analysis-result-${threat.id}" class="d-none">
+                                <hr>
+                                <h6><i class="bi bi-lightbulb"></i> New AI Analysis:</h6>
+                                <div id="ai-analysis-content-${threat.id}"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
         // Add payload data if available
         if (threat.payload) {
             detailsHtml += `
@@ -1108,6 +1139,164 @@ function blockThreat(threatId) {
         console.error('Error blocking threat source:', error);
         showNotification('Error blocking source: ' + error.message, 'danger');
     });
+}
+
+/**
+ * Re-analyze a threat with AI
+ * @param {string} threatId - ID of the threat to re-analyze
+ */
+function reanalyzeWithAI(threatId) {
+    console.log('Re-analyzing threat with AI:', threatId);
+    
+    // Find the threat data
+    const threat = currentThreats.find(t => t.id === threatId);
+    if (!threat) {
+        showNotification('Threat not found', 'danger');
+        return;
+    }
+    
+    // Update button to show loading
+    const btn = document.getElementById(`reanalyze-btn-${threatId}`);
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Analyzing...';
+    }
+    
+    showNotification('Sending to AI for analysis...', 'info');
+    
+    // Call the re-analyze API
+    fetch('/api/v1/ai/reanalyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            source_ip: threat.source_ip,
+            destination_ip: threat.destination_ip,
+            protocol: threat.protocol,
+            threat_type: threat.type || threat.threat_type,
+            description: threat.description,
+            payload: threat.payload,
+            severity: threat.severity,
+            additional_data: threat.additional_data || {}
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log('AI Re-analysis result:', data);
+        
+        // Show the result
+        const resultDiv = document.getElementById(`ai-analysis-result-${threatId}`);
+        const contentDiv = document.getElementById(`ai-analysis-content-${threatId}`);
+        
+        if (resultDiv && contentDiv) {
+            resultDiv.classList.remove('d-none');
+            
+            const analysis = data.analysis || data;
+            const isFalsePositive = analysis.is_false_positive || analysis.severity === 'NORMAL';
+            const severityClass = analysis.severity === 'HIGH' ? 'danger' : 
+                                 analysis.severity === 'MEDIUM' ? 'warning' : 
+                                 analysis.severity === 'NORMAL' ? 'success' : 'info';
+            
+            contentDiv.innerHTML = `
+                <div class="alert alert-${severityClass}">
+                    <strong>Severity:</strong> ${analysis.severity || 'Unknown'}
+                    ${isFalsePositive ? '<span class="badge bg-success ms-2">FALSE POSITIVE</span>' : ''}
+                </div>
+                <p><strong>Type:</strong> ${analysis.threat_type || 'Unknown'}</p>
+                <p><strong>Description:</strong> ${analysis.description || 'No description'}</p>
+                ${analysis.why_safe_or_dangerous ? `<p><strong>Analysis:</strong> ${analysis.why_safe_or_dangerous}</p>` : ''}
+                <p><strong>Risk Score:</strong> ${analysis.risk_score || 0}/100</p>
+                <p><strong>Recommendation:</strong> ${analysis.recommendation || 'Manual review'}</p>
+                ${isFalsePositive ? `
+                    <div class="mt-3">
+                        <button class="btn btn-success btn-sm" onclick="addToWhitelist('${threatId}', '${threat.source_ip}')">
+                            <i class="bi bi-check-circle"></i> Add to Whitelist
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="markAsFalsePositive('${threatId}')">
+                            <i class="bi bi-x-circle"></i> Dismiss as False Positive
+                        </button>
+                    </div>
+                ` : ''}
+            `;
+        }
+        
+        // Reset button
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Re-analyze with AI';
+        }
+        
+        showNotification('AI analysis complete!', 'success');
+    })
+    .catch(error => {
+        console.error('Error re-analyzing threat:', error);
+        showNotification('Error: ' + error.message, 'danger');
+        
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Re-analyze with AI';
+        }
+    });
+}
+
+/**
+ * Add an event/IP to whitelist
+ * @param {string} threatId - ID of the threat
+ * @param {string} sourceIp - Source IP to whitelist
+ */
+function addToWhitelist(threatId, sourceIp) {
+    console.log('Adding to whitelist:', threatId, sourceIp);
+    
+    const threat = currentThreats.find(t => t.id === threatId);
+    const reason = prompt('Reason for whitelisting (optional):', 'Verified as safe system activity');
+    
+    if (reason === null) return; // User cancelled
+    
+    fetch('/api/v1/ai/whitelist/event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            event_type: threat?.type || 'unknown',
+            event_id: threatId,
+            source: sourceIp,
+            reason: reason
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log('Whitelist result:', data);
+        showNotification('Added to whitelist successfully!', 'success');
+        
+        // Also add IP to auto-response whitelist
+        fetch('/api/v1/auto-response/whitelist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip: sourceIp, action: 'add' })
+        });
+        
+        // Mark threat as resolved
+        resolveThreat(threatId);
+    })
+    .catch(error => {
+        console.error('Error adding to whitelist:', error);
+        showNotification('Error: ' + error.message, 'danger');
+    });
+}
+
+/**
+ * Mark a threat as false positive
+ * @param {string} threatId - ID of the threat
+ */
+function markAsFalsePositive(threatId) {
+    console.log('Marking as false positive:', threatId);
+    
+    if (!confirm('Mark this threat as a false positive? It will be resolved and logged.')) {
+        return;
+    }
+    
+    // Resolve the threat
+    resolveThreat(threatId);
+    
+    showNotification('Marked as false positive', 'success');
 }
 
 /**

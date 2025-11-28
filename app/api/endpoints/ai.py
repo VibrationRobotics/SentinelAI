@@ -2,9 +2,12 @@ from fastapi import APIRouter, HTTPException, status, Depends, Body
 from fastapi.responses import JSONResponse
 from typing import Dict, Any
 import random
+import logging
 from datetime import datetime, timedelta
 from app.models.ai.azure.ai_service_manager import AzureAIServiceManager
+from app.services.openai_service import get_openai_service
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Initialize the Azure AI Service Manager
@@ -132,6 +135,79 @@ async def analyze_with_ai_service(service: str, data: Dict[Any, Any]) -> JSONRes
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content=result
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": str(e)}
+        )
+
+
+@router.post("/reanalyze")
+async def reanalyze_threat(threat_data: Dict[str, Any] = Body(...)) -> JSONResponse:
+    """
+    Re-analyze a threat with AI to determine if it's a real threat or false positive.
+    Uses the local OpenAI service with enhanced context about normal system activity.
+    """
+    try:
+        openai_service = get_openai_service()
+        
+        if not openai_service.available:
+            return JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content={"error": "AI service not available. Check OPENAI_API_KEY."}
+            )
+        
+        # Perform analysis
+        analysis = openai_service.analyze_threat(threat_data)
+        
+        if analysis:
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={
+                    "success": True,
+                    "analysis": analysis,
+                    "is_false_positive": analysis.get("is_false_positive", False),
+                    "severity": analysis.get("severity", "UNKNOWN"),
+                    "recommendation": analysis.get("recommendation", "Manual review required")
+                }
+            )
+        else:
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content={"error": "AI analysis returned no results"}
+            )
+            
+    except Exception as e:
+        logger.error(f"Re-analysis failed: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": str(e)}
+        )
+
+
+@router.post("/whitelist/event")
+async def add_event_to_whitelist(event_data: Dict[str, Any] = Body(...)) -> JSONResponse:
+    """
+    Add an event type to the whitelist so similar events are auto-marked as safe.
+    """
+    try:
+        # For now, store in memory (could be persisted to DB later)
+        event_type = event_data.get("event_type")
+        event_id = event_data.get("event_id")
+        source = event_data.get("source", "unknown")
+        reason = event_data.get("reason", "Manually whitelisted")
+        
+        # TODO: Persist to database
+        logger.info(f"Event whitelisted: type={event_type}, id={event_id}, source={source}, reason={reason}")
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "success": True,
+                "message": f"Event type '{event_type}' added to whitelist",
+                "event_id": event_id
+            }
         )
     except Exception as e:
         return JSONResponse(

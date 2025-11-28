@@ -49,14 +49,41 @@ SentinelAI is an intelligent cybersecurity system that provides **real-time thre
 | **File Scanner** | YARA rules, hash checking, VirusTotal integration, quarantine |
 | **Log Aggregation** | Windows Event Logs, auth.log, syslog, custom sources |
 | **Firewall Control** | Windows Firewall (netsh), iptables (Linux), pf (macOS) |
+| **Registry Monitor** | Watches Run keys, Services, Winlogon for persistence |
+| **Startup Monitor** | Tracks startup folder and registry Run entries |
+| **Task Monitor** | Detects new scheduled tasks (persistence mechanism) |
+| **USB Monitor** | Detects USB device connections and removals |
+| **Hosts File Monitor** | Detects DNS hijacking via hosts file changes |
+| **Browser Extensions** | Monitors Chrome/Edge for new extensions |
+| **Clipboard Monitor** | Detects sensitive data (passwords, API keys, crypto wallets) |
+| **DNS Query Monitor** | Detects DNS tunneling and suspicious domain queries |
+| **PowerShell Logging** | Captures all PowerShell script block execution |
+| **WMI Monitor** | Detects WMI persistence and event subscriptions |
+| **DLL Injection** | Monitors for injected DLLs in processes |
+| **Named Pipe Monitor** | Detects C2 communication channels |
+| **Service Monitor** | Detects new service creation (persistence) |
+| **Driver Monitor** | Detects rootkit driver loading |
+| **Firewall Rules** | Monitors for unauthorized firewall rule changes |
+| **Certificate Monitor** | Detects rogue certificates in Windows store |
 
 ### Integrations
 | Integration | Description |
 |-------------|-------------|
 | **OpenAI GPT-4** | Intelligent threat analysis and remediation suggestions |
+| **AVG Antivirus** | Parse AVG/Avast logs for threat detections |
+| **Windows Defender** | Integration with Windows Security Center |
 | **Snort IDS** | Ingest alerts from Snort intrusion detection system |
 | **Docker Projects** | Connect any Docker container for centralized monitoring |
 | **REST API** | Full API for custom integrations and automation |
+
+### Desktop Application
+| Feature | Description |
+|---------|-------------|
+| **Tauri Desktop App** | Native Windows application with embedded agent |
+| **System Tray** | Background protection with tray icon |
+| **Real-time Status** | Live agent status and threat count |
+| **Activity Logs** | View all security events in-app |
+| **One-Click Deploy** | Single exe distribution for endpoints |
 
 ---
 
@@ -126,6 +153,30 @@ source venv/bin/activate
 pip install -r requirements.txt
 sudo python3 agent.py --dashboard http://localhost:8015
 ```
+</details>
+
+<details>
+<summary><b>🖥️ Desktop App (Tauri)</b></summary>
+
+Download the pre-built executable or build from source:
+
+```powershell
+# Pre-built (recommended)
+# Download SentinelAI-Desktop.exe and agent.py to the same folder
+# Run SentinelAI-Desktop.exe
+
+# Build from source
+cd SentinelAI\sentinel-desktop
+npm install
+npm run tauri build
+```
+
+The desktop app includes:
+- Embedded Python agent (auto-starts)
+- Real-time protection status
+- Activity log viewer
+- One-click dashboard access
+
 </details>
 
 ---
@@ -334,6 +385,24 @@ SentinelAI/
 ---
 
 ## 📜 Version History
+
+### v1.3.0 (November 2025) - Advanced Monitoring & Desktop App
+- ✨ **Tauri Desktop App** - Native Windows application with embedded agent
+- ✨ **Clipboard Monitor** - Detect sensitive data exposure
+- ✨ **DNS Query Monitor** - Detect DNS tunneling and suspicious domains
+- ✨ **PowerShell Logging** - Capture all script block execution
+- ✨ **WMI Monitor** - Detect WMI-based persistence
+- ✨ **DLL Injection Detection** - Monitor for injected DLLs
+- ✨ **Named Pipe Monitor** - Detect C2 communication channels
+- ✨ **Service Monitor** - Detect new service creation
+- ✨ **Driver Monitor** - Detect rootkit driver loading
+- ✨ **Firewall Rule Monitor** - Detect unauthorized changes
+- ✨ **Certificate Monitor** - Detect rogue certificates
+- ✨ **Windows Defender Integration** - Native Windows Security
+- ✨ **AVG/Avast Integration** - Parse AV logs for detections
+- ✨ **Audit Log System** - Comprehensive activity logging
+- 🔧 PostgreSQL persistent storage for all events
+- 🔧 Multi-agent SaaS deployment support
 
 ### v1.0.0 (November 2025) - Native Agents Release
 - ✨ Native Windows Agent with AI-powered detection

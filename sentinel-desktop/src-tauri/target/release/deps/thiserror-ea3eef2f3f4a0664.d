@@ -1,0 +1,14 @@
+F:\DESKTOP\sentinel\SentinelAI\sentinel-desktop\src-tauri\target\release\deps\thiserror-ea3eef2f3f4a0664.d: C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\lib.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\aserror.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\display.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\var.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\private.rs F:\DESKTOP\sentinel\SentinelAI\sentinel-desktop\src-tauri\target\release\build\thiserror-17b3a6d2e906d707\out/private.rs
+
+F:\DESKTOP\sentinel\SentinelAI\sentinel-desktop\src-tauri\target\release\deps\libthiserror-ea3eef2f3f4a0664.rlib: C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\lib.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\aserror.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\display.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\var.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\private.rs F:\DESKTOP\sentinel\SentinelAI\sentinel-desktop\src-tauri\target\release\build\thiserror-17b3a6d2e906d707\out/private.rs
+
+F:\DESKTOP\sentinel\SentinelAI\sentinel-desktop\src-tauri\target\release\deps\libthiserror-ea3eef2f3f4a0664.rmeta: C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\lib.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\aserror.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\display.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\var.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\private.rs F:\DESKTOP\sentinel\SentinelAI\sentinel-desktop\src-tauri\target\release\build\thiserror-17b3a6d2e906d707\out/private.rs
+
+C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\lib.rs:
+C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\aserror.rs:
+C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\display.rs:
+C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\var.rs:
+C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\thiserror-2.0.17\src\private.rs:
+F:\DESKTOP\sentinel\SentinelAI\sentinel-desktop\src-tauri\target\release\build\thiserror-17b3a6d2e906d707\out/private.rs:
+
+# env-dep:OUT_DIR=F:\\DESKTOP\\sentinel\\SentinelAI\\sentinel-desktop\\src-tauri\\target\\release\\build\\thiserror-17b3a6d2e906d707\\out

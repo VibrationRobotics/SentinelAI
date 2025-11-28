@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from app.core.config import settings
 # Gradually add routers one by one to isolate any issues
-from app.api.endpoints import auth, incidents, analysis, threats, ai, auto_response, monitoring, logs, windows
+from app.api.endpoints import auth, incidents, analysis, threats, ai, auto_response, monitoring, logs, windows, audit
 from app.db.base import Base, engine
 import logging
 from datetime import datetime
@@ -57,6 +57,7 @@ api_router.include_router(auto_response.router, prefix="/auto-response", tags=["
 api_router.include_router(monitoring.router, prefix="/monitoring", tags=["monitoring"])
 api_router.include_router(logs.router, prefix="/logs", tags=["logs"])
 api_router.include_router(windows.router, prefix="/windows", tags=["windows"])
+api_router.include_router(audit.router, prefix="/audit", tags=["audit"])
 
 # Add proxy endpoint to forward requests to the API
 @app.get("/api/proxy/threats/recent")

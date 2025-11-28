@@ -205,6 +205,16 @@ async def check_analysis_status(
         content=_job_statuses[job_id]
     )
 
+@router.get("")
+async def get_all_threats() -> JSONResponse:
+    """
+    Get all threats (alias for /recent for compatibility)
+    """
+    return JSONResponse(
+        status_code=status.HTTP_200_OK,
+        content=_recent_threats
+    )
+
 @router.get("/recent")
 async def get_recent_threats() -> JSONResponse:
     """

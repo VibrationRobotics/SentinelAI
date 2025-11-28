@@ -454,7 +454,7 @@ const MonitoringDashboard = {
         const agentList = Object.values(agents);
         
         if (agentList.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">No agents connected</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No agents connected</td></tr>';
             return;
         }
 
@@ -464,11 +464,16 @@ const MonitoringDashboard = {
             const capabilities = (agent.capabilities || []).map(c => 
                 `<span class="badge bg-info me-1">${c}</span>`
             ).join('');
+            
+            // Admin status badge
+            const adminBadge = agent.is_admin 
+                ? '<span class="badge bg-warning text-dark ms-1" title="Running as Administrator"><i class="bi bi-shield-check"></i> Admin</span>'
+                : '<span class="badge bg-secondary ms-1" title="Not running as Administrator">User</span>';
 
             return `
                 <tr>
-                    <td><strong>${agent.hostname}</strong></td>
-                    <td>${agent.platform} ${agent.platform_version || ''}</td>
+                    <td><strong>${agent.hostname}</strong>${adminBadge}</td>
+                    <td><small>${agent.platform_version || agent.platform || 'Unknown'}</small></td>
                     <td><span class="badge ${statusClass}">${agent.status}</span></td>
                     <td>${capabilities}</td>
                     <td><small>${lastSeen}</small></td>
@@ -632,4 +637,128 @@ const MonitoringDashboard = {
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', function() {
     MonitoringDashboard.init();
+});
+
+/**
+ * Page Navigation System
+ * Handles switching between Dashboard, Threats, and Agents views
+ */
+function showPage(pageName) {
+    // Update navbar active state
+    document.querySelectorAll('.navbar-nav .nav-link').forEach(link => {
+        link.classList.remove('active');
+        if (link.dataset.page === pageName) {
+            link.classList.add('active');
+        }
+    });
+    
+    // Define page sections
+    const dashboardSections = [
+        'dashboard-main', 'threat-list-container', 'threatChart', 
+        'map', 'originsChart', 'timeline-container'
+    ];
+    
+    // Get all main content sections
+    const allSections = document.querySelectorAll('.dashboard-container > .row');
+    
+    switch(pageName) {
+        case 'dashboard':
+            // Show all sections
+            allSections.forEach(section => {
+                section.style.display = '';
+            });
+            break;
+            
+        case 'threats':
+            // Show only threat-related sections
+            allSections.forEach(section => {
+                const hasThreatContent = section.querySelector('#threat-list') || 
+                                        section.querySelector('#threatChart') ||
+                                        section.id === 'dashboard-main';
+                section.style.display = hasThreatContent ? '' : 'none';
+            });
+            // Scroll to threats
+            const threatList = document.getElementById('threat-list');
+            if (threatList) {
+                threatList.scrollIntoView({ behavior: 'smooth' });
+            }
+            break;
+            
+        case 'agents':
+            // Show only agent/monitoring sections
+            allSections.forEach(section => {
+                const hasAgentContent = section.querySelector('#agents-table') || 
+                                       section.querySelector('.monitoring-card') ||
+                                       section.querySelector('#security-events-table');
+                section.style.display = hasAgentContent ? '' : 'none';
+            });
+            // Scroll to agents section
+            const agentsSection = document.getElementById('agents-table');
+            if (agentsSection) {
+                agentsSection.scrollIntoView({ behavior: 'smooth' });
+            }
+            break;
+    }
+}
+
+/**
+ * Settings Management
+ */
+function loadSettings() {
+    // Load settings from API
+    fetch('/api/v1/auto-response/settings')
+        .then(response => response.json())
+        .then(settings => {
+            document.getElementById('settings-auto-response-toggle').checked = settings.enabled;
+            document.getElementById('settings-severity-threshold').value = settings.threshold || 'HIGH';
+            document.getElementById('settings-cooldown').value = settings.cooldown || 300;
+            if (settings.whitelist) {
+                document.getElementById('settings-whitelist').value = settings.whitelist.join('\n');
+            }
+        })
+        .catch(err => console.debug('Could not load settings:', err));
+}
+
+function saveSettings() {
+    const settings = {
+        enabled: document.getElementById('settings-auto-response-toggle').checked,
+        threshold: document.getElementById('settings-severity-threshold').value,
+        cooldown: parseInt(document.getElementById('settings-cooldown').value),
+        whitelist: document.getElementById('settings-whitelist').value.split('\n').filter(ip => ip.trim())
+    };
+    
+    fetch('/api/v1/auto-response/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings)
+    })
+    .then(response => {
+        if (response.ok) {
+            MonitoringDashboard.showNotification('Settings saved successfully', 'success');
+            // Close modal
+            const modal = bootstrap.Modal.getInstance(document.getElementById('settingsModal'));
+            if (modal) modal.hide();
+        } else {
+            MonitoringDashboard.showNotification('Failed to save settings', 'error');
+        }
+    })
+    .catch(err => {
+        console.error('Error saving settings:', err);
+        MonitoringDashboard.showNotification('Error saving settings', 'error');
+    });
+}
+
+// Bind settings events
+document.addEventListener('DOMContentLoaded', function() {
+    // Load settings when modal opens
+    const settingsModal = document.getElementById('settingsModal');
+    if (settingsModal) {
+        settingsModal.addEventListener('show.bs.modal', loadSettings);
+    }
+    
+    // Save settings button
+    const saveBtn = document.getElementById('saveSettingsButton');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', saveSettings);
+    }
 });

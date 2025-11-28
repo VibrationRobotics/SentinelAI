@@ -204,3 +204,73 @@ async def clear_cooldowns() -> JSONResponse:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"error": str(e)}
         )
+
+
+class SettingsUpdate(BaseModel):
+    """Model for frontend settings update."""
+    enabled: Optional[bool] = None
+    threshold: Optional[str] = None
+    cooldown: Optional[int] = None
+    whitelist: Optional[List[str]] = None
+
+
+@router.get("/settings")
+async def get_settings() -> JSONResponse:
+    """Get settings in frontend-friendly format."""
+    try:
+        service = get_auto_response_service()
+        config = service.get_config()
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "enabled": config.get("enabled", False),
+                "threshold": config.get("severity_threshold", "HIGH"),
+                "cooldown": config.get("cooldown_minutes", 5) * 60,
+                "whitelist": list(config.get("whitelist_ips", []))
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error getting settings: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": str(e)}
+        )
+
+
+@router.post("/settings")
+async def update_settings(settings: SettingsUpdate) -> JSONResponse:
+    """Update settings from frontend."""
+    try:
+        service = get_auto_response_service()
+        
+        updates = {}
+        if settings.enabled is not None:
+            updates["enabled"] = settings.enabled
+        if settings.threshold is not None:
+            updates["severity_threshold"] = settings.threshold
+        if settings.cooldown is not None:
+            updates["cooldown_minutes"] = settings.cooldown // 60
+        
+        if updates:
+            service.update_config(**updates)
+        
+        # Update whitelist if provided
+        if settings.whitelist is not None:
+            # Clear and re-add whitelist
+            current = list(service.config.whitelist_ips)
+            for ip in current:
+                service.remove_from_whitelist(ip)
+            for ip in settings.whitelist:
+                if ip.strip():
+                    service.add_to_whitelist(ip.strip())
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"message": "Settings saved"}
+        )
+    except Exception as e:
+        logger.error(f"Error updating settings: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": str(e)}
+        )

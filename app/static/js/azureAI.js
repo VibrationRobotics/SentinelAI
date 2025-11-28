@@ -225,12 +225,18 @@ function loadAISettings() {
 function saveAISettings() {
     console.log('Saving AI settings to API');
     
-    // Get settings from form elements
-    const azureServicesEnabled = document.getElementById('azure-services-toggle').checked;
-    const useGPT4o = document.getElementById('local-gpt4-toggle').checked;
-    const gpt4oApiKey = document.getElementById('gpt4o-api-key').value;
-    const gpt4oEndpoint = document.getElementById('gpt4o-endpoint').value;
-    const hideDisabledServices = document.getElementById('hide-disabled-services').checked;
+    // Get settings from form elements (with null checks for removed elements)
+    const azureToggle = document.getElementById('azure-services-toggle');
+    const gpt4Toggle = document.getElementById('local-gpt4-toggle') || document.getElementById('settings-ai-enabled');
+    const apiKeyInput = document.getElementById('gpt4o-api-key');
+    const endpointInput = document.getElementById('gpt4o-endpoint');
+    const hideToggle = document.getElementById('hide-disabled-services');
+    
+    const azureServicesEnabled = azureToggle ? azureToggle.checked : false;
+    const useGPT4o = gpt4Toggle ? gpt4Toggle.checked : true;
+    const gpt4oApiKey = apiKeyInput ? apiKeyInput.value : '';
+    const gpt4oEndpoint = endpointInput ? endpointInput.value : '';
+    const hideDisabledServices = hideToggle ? hideToggle.checked : true;
     
     // Prepare settings object
     const settings = {

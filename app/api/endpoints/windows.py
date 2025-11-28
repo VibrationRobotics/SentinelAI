@@ -274,6 +274,7 @@ class AgentRegistration(BaseModel):
     platform_version: str
     agent_version: str
     capabilities: List[str]
+    is_admin: Optional[bool] = False
 
 
 @router.post("/agent/register")
@@ -288,6 +289,7 @@ async def register_agent(registration: AgentRegistration) -> JSONResponse:
             "platform_version": registration.platform_version,
             "agent_version": registration.agent_version,
             "capabilities": registration.capabilities,
+            "is_admin": registration.is_admin,
             "registered_at": datetime.utcnow().isoformat(),
             "last_seen": datetime.utcnow().isoformat(),
             "status": "online"

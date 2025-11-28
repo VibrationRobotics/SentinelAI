@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SentinelAI Desktop</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --bg-dark: #1a1a2e;
+            --bg-card: #16213e;
+            --accent: #0f3460;
+            --highlight: #e94560;
+            --text: #eaeaea;
+            --success: #00d26a;
+            --warning: #ffc107;
+            --danger: #dc3545;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text);
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        
+        /* Title bar for dragging */
+        .titlebar {
+            height: 32px;
+            background: var(--accent);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 10px;
+            -webkit-app-region: drag;
+            user-select: none;
+        }
+        
+        .titlebar-title {
+            font-size: 13px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .titlebar-buttons {
+            display: flex;
+            -webkit-app-region: no-drag;
+        }
+        
+        .titlebar-btn {
+            width: 46px;
+            height: 32px;
+            border: none;
+            background: transparent;
+            color: var(--text);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .titlebar-btn:hover {
+            background: rgba(255,255,255,0.1);
+        }
+        
+        .titlebar-btn.close:hover {
+            background: var(--danger);
+        }
+        
+        /* Main container */
+        .main-container {
+            height: calc(100vh - 32px);
+            display: flex;
+        }
+        
+        /* Sidebar */
+        .sidebar {
+            width: 60px;
+            background: var(--bg-card);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 15px 0;
+            border-right: 1px solid var(--accent);
+        }
+        
+        .nav-item {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 10px;
+            cursor: pointer;
+            color: var(--text);
+            opacity: 0.6;
+            transition: all 0.2s;
+        }
+        
+        .nav-item:hover, .nav-item.active {
+            background: var(--accent);
+            opacity: 1;
+        }
+        
+        .nav-item.active {
+            color: var(--highlight);
+        }
+        
+        .nav-item i {
+            font-size: 20px;
+        }
+        
+        /* Content area */
+        .content {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        
+        /* Status cards */
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .status-card {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 15px;
+            border: 1px solid var(--accent);
+        }
+        
+        .status-card .icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 10px;
+            font-size: 18px;
+        }
+        
+        .status-card .value {
+            font-size: 24px;
+            font-weight: 700;
+        }
+        
+        .status-card .label {
+            font-size: 12px;
+            opacity: 0.7;
+        }
+        
+        /* Protection status */
+        .protection-status {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid var(--accent);
+        }
+        
+        .protection-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .protection-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+        }
+        
+        .protection-icon.protected {
+            background: rgba(0, 210, 106, 0.2);
+            color: var(--success);
+        }
+        
+        .protection-icon.warning {
+            background: rgba(255, 193, 7, 0.2);
+            color: var(--warning);
+        }
+        
+        .protection-icon.danger {
+            background: rgba(220, 53, 69, 0.2);
+            color: var(--danger);
+        }
+        
+        .protection-title {
+            font-size: 20px;
+            font-weight: 600;
+        }
+        
+        .protection-subtitle {
+            font-size: 13px;
+            opacity: 0.7;
+        }
+        
+        /* Monitor list */
+        .monitor-list {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+        
+        .monitor-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px;
+            background: var(--accent);
+            border-radius: 8px;
+        }
+        
+        .monitor-item .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+        
+        .monitor-item .status-dot.active {
+            background: var(--success);
+            box-shadow: 0 0 8px var(--success);
+        }
+        
+        .monitor-item .status-dot.inactive {
+            background: var(--danger);
+        }
+        
+        /* Recent events */
+        .events-card {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid var(--accent);
+        }
+        
+        .events-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .events-title {
+            font-size: 16px;
+            font-weight: 600;
+        }
+        
+        .event-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            background: var(--accent);
+        }
+        
+        .event-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .event-icon.high {
+            background: rgba(220, 53, 69, 0.2);
+            color: var(--danger);
+        }
+        
+        .event-icon.medium {
+            background: rgba(255, 193, 7, 0.2);
+            color: var(--warning);
+        }
+        
+        .event-icon.low {
+            background: rgba(0, 210, 106, 0.2);
+            color: var(--success);
+        }
+        
+        .event-details {
+            flex: 1;
+        }
+        
+        .event-title {
+            font-size: 13px;
+            font-weight: 500;
+        }
+        
+        .event-time {
+            font-size: 11px;
+            opacity: 0.6;
+        }
+        
+        /* Buttons */
+        .btn-sentinel {
+            background: var(--highlight);
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        
+        .btn-sentinel:hover {
+            filter: brightness(1.1);
+        }
+        
+        /* System tray hint */
+        .tray-hint {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: var(--accent);
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 12px;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <!-- Custom Title Bar -->
+    <div class="titlebar">
+        <div class="titlebar-title">
+            <i class="bi bi-shield-lock-fill" style="color: var(--highlight);"></i>
+            SentinelAI Desktop
+        </div>
+        <div class="titlebar-buttons">
+            <button class="titlebar-btn" id="minimize-btn">
+                <i class="bi bi-dash-lg"></i>
+            </button>
+            <button class="titlebar-btn" id="maximize-btn">
+                <i class="bi bi-square"></i>
+            </button>
+            <button class="titlebar-btn close" id="close-btn">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+    </div>
+    
+    <div class="main-container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="nav-item active" data-page="dashboard" title="Dashboard">
+                <i class="bi bi-speedometer2"></i>
+            </div>
+            <div class="nav-item" data-page="threats" title="Threats">
+                <i class="bi bi-exclamation-triangle"></i>
+            </div>
+            <div class="nav-item" data-page="monitors" title="Monitors">
+                <i class="bi bi-eye"></i>
+            </div>
+            <div class="nav-item" data-page="firewall" title="Firewall">
+                <i class="bi bi-shield-check"></i>
+            </div>
+            <div class="nav-item" data-page="settings" title="Settings">
+                <i class="bi bi-gear"></i>
+            </div>
+            <div style="flex: 1;"></div>
+            <div class="nav-item" id="dashboard-link" title="Open Dashboard">
+                <i class="bi bi-box-arrow-up-right"></i>
+            </div>
+        </div>
+        
+        <!-- Content -->
+        <div class="content">
+            <!-- Status Cards -->
+            <div class="status-grid">
+                <div class="status-card">
+                    <div class="icon" style="background: rgba(0, 210, 106, 0.2); color: var(--success);">
+                        <i class="bi bi-shield-check"></i>
+                    </div>
+                    <div class="value" id="threats-blocked">0</div>
+                    <div class="label">Threats Blocked</div>
+                </div>
+                <div class="status-card">
+                    <div class="icon" style="background: rgba(233, 69, 96, 0.2); color: var(--highlight);">
+                        <i class="bi bi-exclamation-triangle"></i>
+                    </div>
+                    <div class="value" id="active-threats">0</div>
+                    <div class="label">Active Threats</div>
+                </div>
+                <div class="status-card">
+                    <div class="icon" style="background: rgba(15, 52, 96, 0.5); color: var(--text);">
+                        <i class="bi bi-cpu"></i>
+                    </div>
+                    <div class="value" id="processes-monitored">0</div>
+                    <div class="label">Processes</div>
+                </div>
+                <div class="status-card">
+                    <div class="icon" style="background: rgba(15, 52, 96, 0.5); color: var(--text);">
+                        <i class="bi bi-hdd-network"></i>
+                    </div>
+                    <div class="value" id="connections">0</div>
+                    <div class="label">Connections</div>
+                </div>
+            </div>
+            
+            <!-- Protection Status -->
+            <div class="protection-status">
+                <div class="protection-header">
+                    <div class="protection-icon warning" id="protection-icon" style="cursor: pointer;" onclick="window.startAgentManual && window.startAgentManual()">
+                        <i class="bi bi-shield-exclamation"></i>
+                    </div>
+                    <div>
+                        <div class="protection-title" id="protection-title">Not Connected</div>
+                        <div class="protection-subtitle" id="protection-subtitle">Click shield or button to start agent</div>
+                    </div>
+                    <div style="flex: 1;"></div>
+                    <button class="btn-sentinel" id="start-agent-btn" style="background: #00d26a; margin-right: 10px;">
+                        <i class="bi bi-play-fill me-2"></i>Start Agent
+                    </button>
+                    <button class="btn-sentinel" id="scan-btn">
+                        <i class="bi bi-search me-2"></i>Quick Scan
+                    </button>
+                </div>
+                
+                <div class="monitor-list">
+                    <div class="monitor-item">
+                        <div class="status-dot active"></div>
+                        <span>Process Monitor</span>
+                    </div>
+                    <div class="monitor-item">
+                        <div class="status-dot active"></div>
+                        <span>Network Monitor</span>
+                    </div>
+                    <div class="monitor-item">
+                        <div class="status-dot active"></div>
+                        <span>Registry Monitor</span>
+                    </div>
+                    <div class="monitor-item">
+                        <div class="status-dot active"></div>
+                        <span>Startup Monitor</span>
+                    </div>
+                    <div class="monitor-item">
+                        <div class="status-dot active"></div>
+                        <span>Task Monitor</span>
+                    </div>
+                    <div class="monitor-item">
+                        <div class="status-dot active"></div>
+                        <span>USB Monitor</span>
+                    </div>
+                    <div class="monitor-item">
+                        <div class="status-dot active"></div>
+                        <span>Event Log Monitor</span>
+                    </div>
+                    <div class="monitor-item">
+                        <div class="status-dot active"></div>
+                        <span>AI Analysis</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Recent Events -->
+            <div class="events-card">
+                <div class="events-header">
+                    <div class="events-title">Recent Events</div>
+                    <button class="btn-sentinel" style="padding: 6px 12px; font-size: 12px;">
+                        View All
+                    </button>
+                </div>
+                <div id="events-list">
+                    <div class="event-item">
+                        <div class="event-icon low">
+                            <i class="bi bi-usb-drive"></i>
+                        </div>
+                        <div class="event-details">
+                            <div class="event-title">USB device connected</div>
+                            <div class="event-time">Just now</div>
+                        </div>
+                    </div>
+                    <div class="event-item">
+                        <div class="event-icon medium">
+                            <i class="bi bi-calendar-check"></i>
+                        </div>
+                        <div class="event-details">
+                            <div class="event-title">New scheduled task detected</div>
+                            <div class="event-time">2 minutes ago</div>
+                        </div>
+                    </div>
+                    <div class="event-item">
+                        <div class="event-icon high">
+                            <i class="bi bi-exclamation-octagon"></i>
+                        </div>
+                        <div class="event-details">
+                            <div class="event-title">Suspicious process blocked</div>
+                            <div class="event-time">5 minutes ago</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Logs Page (hidden by default) -->
+            <div id="logs-page" class="page-content" style="display: none;">
+                <div class="events-card" style="height: calc(100vh - 180px);">
+                    <div class="events-header">
+                        <div class="events-title">
+                            <i class="bi bi-journal-text me-2"></i>Activity Logs
+                        </div>
+                        <div style="display: flex; gap: 10px;">
+                            <select id="log-filter-severity" class="form-select form-select-sm" style="width: auto; background: var(--accent); color: var(--text); border: 1px solid var(--accent);">
+                                <option value="">All Severities</option>
+                                <option value="INFO">INFO</option>
+                                <option value="WARNING">WARNING</option>
+                                <option value="ERROR">ERROR</option>
+                                <option value="CRITICAL">CRITICAL</option>
+                            </select>
+                            <select id="log-filter-source" class="form-select form-select-sm" style="width: auto; background: var(--accent); color: var(--text); border: 1px solid var(--accent);">
+                                <option value="">All Sources</option>
+                                <option value="agent">Agent</option>
+                                <option value="dashboard">Dashboard</option>
+                                <option value="tauri">Tauri App</option>
+                                <option value="api">API</option>
+                            </select>
+                            <button class="btn-sentinel" id="refresh-logs-btn" style="padding: 6px 12px; font-size: 12px;">
+                                <i class="bi bi-arrow-clockwise"></i> Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div id="logs-list" style="overflow-y: auto; max-height: calc(100% - 60px); padding: 10px;">
+                        <div class="text-center text-muted py-4">
+                            <i class="bi bi-journal-text" style="font-size: 48px; opacity: 0.3;"></i>
+                            <p class="mt-2">Loading logs...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="tray-hint">
+        <i class="bi bi-info-circle me-1"></i>
+        Minimize to system tray for background protection
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>

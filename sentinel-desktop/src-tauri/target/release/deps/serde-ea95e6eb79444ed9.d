@@ -1,0 +1,14 @@
+F:\DESKTOP\sentinel\SentinelAI\sentinel-desktop\src-tauri\target\release\deps\serde-ea95e6eb79444ed9.d: C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs F:\DESKTOP\sentinel\SentinelAI\sentinel-desktop\src-tauri\target\release\build\serde-b9d37fe62ac273c7\out/private.rs
+
+F:\DESKTOP\sentinel\SentinelAI\sentinel-desktop\src-tauri\target\release\deps\libserde-ea95e6eb79444ed9.rlib: C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs F:\DESKTOP\sentinel\SentinelAI\sentinel-desktop\src-tauri\target\release\build\serde-b9d37fe62ac273c7\out/private.rs
+
+F:\DESKTOP\sentinel\SentinelAI\sentinel-desktop\src-tauri\target\release\deps\libserde-ea95e6eb79444ed9.rmeta: C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs F:\DESKTOP\sentinel\SentinelAI\sentinel-desktop\src-tauri\target\release\build\serde-b9d37fe62ac273c7\out/private.rs
+
+C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs:
+C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs:
+C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs:
+C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs:
+C:\Users\markv\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs:
+F:\DESKTOP\sentinel\SentinelAI\sentinel-desktop\src-tauri\target\release\build\serde-b9d37fe62ac273c7\out/private.rs:
+
+# env-dep:OUT_DIR=F:\\DESKTOP\\sentinel\\SentinelAI\\sentinel-desktop\\src-tauri\\target\\release\\build\\serde-b9d37fe62ac273c7\\out

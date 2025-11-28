@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SentinelAI Dashboard</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🛡️</text></svg>" type="image/svg+xml">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css">
@@ -31,20 +32,23 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
-                        <a class="nav-link active" href="#">Dashboard</a>
+                        <a class="nav-link active" href="#" data-page="dashboard" onclick="showPage('dashboard')">
+                            <i class="bi bi-speedometer2 me-1"></i>Dashboard
+                        </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="#">Threats</a>
+                        <a class="nav-link" href="#" data-page="threats" onclick="showPage('threats')">
+                            <i class="bi bi-exclamation-triangle me-1"></i>Threats
+                        </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="#">Incidents</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="#">Reports</a>
+                        <a class="nav-link" href="#" data-page="agents" onclick="showPage('agents')">
+                            <i class="bi bi-pc-display me-1"></i>Agents
+                        </a>
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" href="#" data-bs-toggle="modal" data-bs-target="#settingsModal">
-                            <i class="bi bi-gear-fill"></i> Settings
+                            <i class="bi bi-gear-fill me-1"></i>Settings
                         </a>
                     </li>
                 </ul>
@@ -1198,76 +1202,102 @@
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="settingsModalLabel">Settings</h5>
+                    <h5 class="modal-title" id="settingsModalLabel"><i class="bi bi-gear-fill me-2"></i>Settings</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
                     <div class="row">
+                        <!-- Auto-Response Settings -->
                         <div class="col-md-6">
                             <div class="card mb-3">
-                                <div class="card-header">Azure Services</div>
+                                <div class="card-header"><i class="bi bi-shield-check me-2"></i>Auto-Response</div>
                                 <div class="card-body">
-                                    <div class="form-check form-switch">
-                                        <input class="form-check-input" type="checkbox" id="azure-services-toggle">
-                                        <label class="form-check-label" for="azure-services-toggle">
-                                            Enable All Azure Services
+                                    <div class="form-check form-switch mb-3">
+                                        <input class="form-check-input" type="checkbox" id="settings-auto-response-toggle">
+                                        <label class="form-check-label" for="settings-auto-response-toggle">
+                                            Enable Auto-Response
                                         </label>
+                                        <div class="form-text">Automatically block IPs and kill processes for HIGH severity threats</div>
                                     </div>
-                                    <hr>
-                                    <div class="service-list mt-3">
-                                        <div class="d-flex justify-content-between mb-2">
-                                            <span>Azure OpenAI</span>
-                                            <span class="badge bg-secondary azure-service-status">Disabled</span>
-                                        </div>
-                                        <div class="d-flex justify-content-between mb-2">
-                                            <span>Azure Metrics Advisor</span>
-                                            <span class="badge bg-secondary azure-service-status">Disabled</span>
-                                        </div>
-                                        <div class="d-flex justify-content-between mb-2">
-                                            <span>Azure Synapse Analytics</span>
-                                            <span class="badge bg-secondary azure-service-status">Disabled</span>
-                                        </div>
-                                        <div class="d-flex justify-content-between mb-2">
-                                            <span>Azure AI Search</span>
-                                            <span class="badge bg-secondary azure-service-status">Disabled</span>
-                                        </div>
-                                        <div class="d-flex justify-content-between mb-2">
-                                            <span>Azure Content Safety</span>
-                                            <span class="badge bg-secondary azure-service-status">Disabled</span>
-                                        </div>
+                                    <div class="mb-3">
+                                        <label for="settings-severity-threshold" class="form-label">Severity Threshold</label>
+                                        <select class="form-select" id="settings-severity-threshold">
+                                            <option value="HIGH">HIGH only</option>
+                                            <option value="MEDIUM">MEDIUM and above</option>
+                                            <option value="LOW">All severities</option>
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="settings-cooldown" class="form-label">Cooldown (seconds)</label>
+                                        <input type="number" class="form-control" id="settings-cooldown" value="300" min="60" max="3600">
+                                        <div class="form-text">Time before same IP can be blocked again</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card mb-3">
+                                <div class="card-header"><i class="bi bi-list-check me-2"></i>IP Whitelist</div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <label for="settings-whitelist" class="form-label">Whitelisted IPs (one per line)</label>
+                                        <textarea class="form-control" id="settings-whitelist" rows="4">127.0.0.1
+192.168.1.1
+10.0.0.0/8</textarea>
+                                        <div class="form-text">These IPs will never be blocked</div>
                                     </div>
                                 </div>
                             </div>
                         </div>
+                        <!-- AI & Monitoring Settings -->
                         <div class="col-md-6">
                             <div class="card mb-3">
-                                <div class="card-header">Local GPT-4o</div>
+                                <div class="card-header"><i class="bi bi-robot me-2"></i>AI Analysis</div>
                                 <div class="card-body">
-                                    <div class="form-check form-switch">
-                                        <input class="form-check-input" type="checkbox" id="local-gpt4-toggle" checked>
-                                        <label class="form-check-label" for="local-gpt4-toggle">
-                                            Enable Local GPT-4o
+                                    <div class="form-check form-switch mb-3">
+                                        <input class="form-check-input" type="checkbox" id="settings-ai-enabled" checked>
+                                        <label class="form-check-label" for="settings-ai-enabled">
+                                            Enable AI Analysis (GPT-4)
                                         </label>
                                     </div>
-                                    <div class="mb-3 mt-3">
-                                        <label for="gpt4o-api-key" class="form-label">GPT-4o API Key</label>
-                                        <input type="password" class="form-control" id="gpt4o-api-key" placeholder="Enter your GPT-4o API key">
-                                        <div class="form-text">Your API key is securely stored and never shared.</div>
-                                    </div>
                                     <div class="mb-3">
-                                        <label for="gpt4o-endpoint" class="form-label">Endpoint (optional)</label>
-                                        <input type="text" class="form-control" id="gpt4o-endpoint" placeholder="Custom endpoint URL (if any)">
+                                        <label class="form-label">API Status</label>
+                                        <div id="settings-api-status">
+                                            <span class="badge bg-success">Connected</span>
+                                            <small class="text-muted ms-2">API key configured in .env</small>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                             <div class="card mb-3">
-                                <div class="card-header">Display Options</div>
+                                <div class="card-header"><i class="bi bi-pc-display me-2"></i>Monitoring</div>
                                 <div class="card-body">
-                                    <div class="form-check form-switch">
-                                        <input class="form-check-input" type="checkbox" id="hide-disabled-services" checked>
-                                        <label class="form-check-label" for="hide-disabled-services">
-                                            Hide Disabled Services in Dashboard
-                                        </label>
+                                    <div class="form-check form-switch mb-2">
+                                        <input class="form-check-input" type="checkbox" id="settings-process-monitor" checked>
+                                        <label class="form-check-label" for="settings-process-monitor">Process Monitor</label>
+                                    </div>
+                                    <div class="form-check form-switch mb-2">
+                                        <input class="form-check-input" type="checkbox" id="settings-network-monitor" checked>
+                                        <label class="form-check-label" for="settings-network-monitor">Network Monitor</label>
+                                    </div>
+                                    <div class="form-check form-switch mb-2">
+                                        <input class="form-check-input" type="checkbox" id="settings-log-collector" checked>
+                                        <label class="form-check-label" for="settings-log-collector">Log Collector</label>
+                                    </div>
+                                    <div class="form-check form-switch mb-2">
+                                        <input class="form-check-input" type="checkbox" id="settings-file-scanner">
+                                        <label class="form-check-label" for="settings-file-scanner">File Scanner</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card mb-3">
+                                <div class="card-header"><i class="bi bi-bell me-2"></i>Notifications</div>
+                                <div class="card-body">
+                                    <div class="form-check form-switch mb-2">
+                                        <input class="form-check-input" type="checkbox" id="settings-browser-notifications" checked>
+                                        <label class="form-check-label" for="settings-browser-notifications">Browser Notifications</label>
+                                    </div>
+                                    <div class="form-check form-switch mb-2">
+                                        <input class="form-check-input" type="checkbox" id="settings-sound-alerts">
+                                        <label class="form-check-label" for="settings-sound-alerts">Sound Alerts</label>
                                     </div>
                                 </div>
                             </div>

@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.endpoints import threats, incidents, analysis, auth, ai
+from app.api.endpoints import threats, incidents, analysis, auth, ai, audit
 
 api_router = APIRouter()
 
@@ -8,3 +8,4 @@ api_router.include_router(threats.router, prefix="/threats", tags=["threats"])
 api_router.include_router(incidents.router, prefix="/incidents", tags=["incidents"])
 api_router.include_router(analysis.router, prefix="/analysis", tags=["analysis"])
 api_router.include_router(ai.router, prefix="/ai", tags=["ai"])
+api_router.include_router(audit.router, prefix="/audit", tags=["audit"])
