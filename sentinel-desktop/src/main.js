@@ -1,7 +1,7 @@
 /**
- * SentinelAI Desktop - Main JavaScript
+ * SentinelAI Desktop v1.4.0 - Main JavaScript
  * Handles UI interactions and communication with Tauri backend
- * Includes embedded agent management
+ * Features: Hybrid ML detection, AI analysis, autostart, settings
  */
 
 // Check if running in Tauri
@@ -294,6 +294,9 @@ function setupNavigation() {
             } else if (page === 'monitors') {
                 showPage('logs');
                 loadAuditLogs();
+            } else if (page === 'settings') {
+                showPage('settings');
+                loadSettings();
             } else if (pageConfig?.openDashboard) {
                 openDashboard();
                 showToast(`Opening ${pageConfig.name} in dashboard...`);
@@ -322,23 +325,87 @@ function showPage(pageName) {
     document.querySelectorAll('.page-content').forEach(p => p.style.display = 'none');
     
     // Show dashboard content by default
-    const dashboardContent = document.querySelector('.content > .status-grid')?.parentElement;
     const logsPage = document.getElementById('logs-page');
+    const settingsPage = document.getElementById('settings-page');
     
     if (pageName === 'logs' && logsPage) {
         // Hide dashboard elements, show logs
-        document.querySelectorAll('.content > *:not(#logs-page)').forEach(el => {
-            if (el.id !== 'logs-page') el.style.display = 'none';
+        document.querySelectorAll('.content > *:not(.page-content)').forEach(el => {
+            el.style.display = 'none';
         });
         logsPage.style.display = 'block';
+    } else if (pageName === 'settings' && settingsPage) {
+        // Hide dashboard elements, show settings
+        document.querySelectorAll('.content > *:not(.page-content)').forEach(el => {
+            el.style.display = 'none';
+        });
+        settingsPage.style.display = 'block';
     } else {
-        // Show dashboard elements, hide logs
-        document.querySelectorAll('.content > *:not(#logs-page)').forEach(el => {
+        // Show dashboard elements, hide other pages
+        document.querySelectorAll('.content > *:not(.page-content)').forEach(el => {
             el.style.display = '';
         });
-        if (logsPage) logsPage.style.display = 'none';
     }
 }
+
+/**
+ * Load settings from Tauri backend
+ */
+async function loadSettings() {
+    if (!isTauri) return;
+    
+    try {
+        // Check autostart status
+        const autostartEnabled = await invoke('is_autostart_enabled');
+        document.getElementById('autostart-toggle').checked = autostartEnabled;
+        
+        // Load dashboard URL
+        const dashboardUrl = await invoke('get_dashboard_url');
+        document.getElementById('dashboard-url').value = dashboardUrl || DASHBOARD_URL;
+    } catch (error) {
+        console.debug('Failed to load settings:', error);
+    }
+    
+    // Setup save button
+    document.getElementById('save-settings-btn')?.addEventListener('click', saveSettings);
+    
+    // Setup autostart toggle
+    document.getElementById('autostart-toggle')?.addEventListener('change', async (e) => {
+        try {
+            const result = await invoke('set_autostart', { enabled: e.target.checked });
+            showToast(result);
+        } catch (error) {
+            showToast('Failed to update autostart: ' + error, 'error');
+            e.target.checked = !e.target.checked; // Revert
+        }
+    });
+}
+
+/**
+ * Save settings
+ */
+async function saveSettings() {
+    const dashboardUrl = document.getElementById('dashboard-url')?.value;
+    if (dashboardUrl) {
+        DASHBOARD_URL = dashboardUrl;
+        localStorage.setItem('dashboardUrl', dashboardUrl);
+    }
+    
+    showToast('Settings saved');
+}
+
+/**
+ * Open GitHub repository
+ */
+function openGitHub() {
+    const url = 'https://github.com/VibrationRobotics/SentinelAI';
+    if (isTauri && window.__TAURI__?.shell?.open) {
+        window.__TAURI__.shell.open(url);
+    } else {
+        window.open(url, '_blank');
+    }
+}
+window.openGitHub = openGitHub;
 
 /**
  * Load audit logs from API

@@ -28,6 +28,13 @@ if platform.system() != "Windows":
 import psutil
 import requests
 
+# Import local ML detector
+try:
+    from ml_detector import HybridThreatDetector, get_detector
+    ML_AVAILABLE = True
+except ImportError:
+    ML_AVAILABLE = False
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -148,8 +155,12 @@ class WindowsAgent:
         self.use_ai = True
         self.ai_cache: Dict[str, Dict] = {}  # Cache AI results to avoid repeated calls
         
+        # Hybrid ML/Rule-based detector (reduces OpenAI costs by 95%+)
+        self.hybrid_detector = get_detector(use_ai=self.use_ai) if ML_AVAILABLE else None
+        
         logger.info(f"Windows Agent initialized - Dashboard: {self.dashboard_url}")
         logger.info(f"AI-powered analysis: {'Enabled' if self.use_ai else 'Disabled'}")
+        logger.info(f"Hybrid ML detector: {'Enabled' if self.hybrid_detector else 'Disabled (install ml_detector.py)'}")
     
     def start(self):
         """Start the Windows agent."""
@@ -179,6 +190,22 @@ class WindowsAgent:
             threading.Thread(target=self._browser_extension_monitor_loop, daemon=True),
             # AVG Antivirus integration
             threading.Thread(target=self._avg_monitor_loop, daemon=True),
+            # Advanced monitors (Phase 8)
+            threading.Thread(target=self._clipboard_monitor_loop, daemon=True),
+            threading.Thread(target=self._dns_monitor_loop, daemon=True),
+            threading.Thread(target=self._powershell_monitor_loop, daemon=True),
+            threading.Thread(target=self._wmi_monitor_loop, daemon=True),
+            threading.Thread(target=self._service_monitor_loop, daemon=True),
+            threading.Thread(target=self._driver_monitor_loop, daemon=True),
+            threading.Thread(target=self._firewall_rule_monitor_loop, daemon=True),
+            threading.Thread(target=self._certificate_monitor_loop, daemon=True),
+            threading.Thread(target=self._named_pipe_monitor_loop, daemon=True),
+            threading.Thread(target=self._defender_monitor_loop, daemon=True),
+            # AMSI, ETW, Sysmon, DLL Injection (Phase 9)
+            threading.Thread(target=self._amsi_monitor_loop, daemon=True),
+            threading.Thread(target=self._etw_monitor_loop, daemon=True),
+            threading.Thread(target=self._sysmon_monitor_loop, daemon=True),
+            threading.Thread(target=self._dll_injection_monitor_loop, daemon=True),
         ]
         
         for t in threads:
@@ -249,9 +276,15 @@ class WindowsAgent:
                 'hostname': platform.node(),
                 'platform': platform.system(),
                 'platform_version': windows_version,
-                'agent_version': '1.2.0',
+                'agent_version': '1.4.0',
                 'is_admin': is_admin,
-                'capabilities': ['process', 'network', 'eventlog', 'firewall', 'ai', 'registry', 'startup', 'tasks', 'usb', 'hosts', 'browser']
+                'capabilities': [
+                    'process', 'network', 'eventlog', 'firewall', 'ai', 
+                    'registry', 'startup', 'tasks', 'usb', 'hosts', 'browser',
+                    'clipboard', 'dns', 'powershell', 'wmi', 'services',
+                    'drivers', 'firewall_rules', 'certificates', 'named_pipes', 'defender',
+                    'amsi', 'etw', 'sysmon', 'dll_injection'
+                ]
             }
             
             response = requests.post(
@@ -330,6 +363,65 @@ class WindowsAgent:
             logger.debug(f"AI analysis error: {e}")
             return {'is_threat': False, 'confidence': 0, 'reason': f'Error: {e}'}
     
+    def _analyze_event_with_ai(self, event: SecurityEvent) -> Dict:
+        """
+        Send any security event to AI for intelligent analysis.
+        Used for HIGH/CRITICAL severity events from all monitors.
+        """
+        if not self.use_ai:
+            return None
+        
+        # Create cache key from event type and description
+        cache_key = f"{event.event_type}:{event.description[:100]}"
+        
+        # Check cache first
+        if cache_key in self.ai_cache:
+            return self.ai_cache[cache_key]
+        
+        try:
+            analysis_request = {
+                'source_ip': event.ip_address or '127.0.0.1',
+                'threat_type': event.event_type,
+                'severity': event.severity,
+                'description': f"[{event.source.upper()}] {event.description}",
+                'payload': json.dumps(event.details),
+                'timestamp': event.timestamp,
+                'agent_source': 'windows_agent',
+                'request_ai_analysis': True
+            }
+            
+            response = requests.post(
+                f"{self.api_base}/threats/analyze",
+                json=analysis_request,
+                timeout=15
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                self.stats['ai_analyses'] += 1
+                
+                ai_result = {
+                    'analyzed': True,
+                    'ai_severity': result.get('severity', event.severity),
+                    'ai_classification': result.get('classification', 'unknown'),
+                    'ai_confidence': result.get('confidence', 0.5),
+                    'ai_explanation': result.get('ai_analysis', {}).get('explanation', ''),
+                    'ai_recommendation': result.get('recommended_action', 'monitor'),
+                    'is_false_positive': result.get('ai_analysis', {}).get('is_false_positive', False),
+                    'mitre_techniques': result.get('ai_analysis', {}).get('mitre_techniques', [])
+                }
+                
+                # Cache the result
+                self.ai_cache[cache_key] = ai_result
+                
+                logger.info(f"AI analyzed {event.event_type}: {ai_result['ai_classification']} (confidence: {ai_result['ai_confidence']})")
+                return ai_result
+            
+        except Exception as e:
+            logger.debug(f"AI event analysis error: {e}")
+        
+        return None
+    
     def _smart_process_check(self, proc_info: Dict) -> tuple:
         """
         Two-stage process analysis:
@@ -395,13 +487,51 @@ class WindowsAgent:
         self.event_queue.put(event)
     
     def _event_sender_loop(self):
-        """Background thread to send events to dashboard."""
+        """Background thread to send events to dashboard with hybrid ML/AI analysis."""
         while self.running:
             try:
                 # Get event with timeout
                 event = self.event_queue.get(timeout=1)
                 
-                # Send to dashboard
+                # Step 1: Use hybrid detector (rules + local ML) - FREE and FAST
+                should_use_openai = False
+                local_analysis = None
+                
+                if self.hybrid_detector:
+                    score, should_use_openai = self.hybrid_detector.analyze(
+                        event.event_type, 
+                        event.details
+                    )
+                    
+                    local_analysis = {
+                        'method': 'hybrid_ml',
+                        'is_threat': score.is_threat,
+                        'confidence': score.confidence,
+                        'threat_type': score.threat_type,
+                        'severity': score.severity,
+                        'reason': score.reason,
+                    }
+                    
+                    # Update event severity based on local analysis
+                    if not score.is_threat and score.confidence > 0.8:
+                        # High confidence it's safe - downgrade severity
+                        if event.severity in ['HIGH', 'CRITICAL']:
+                            event.severity = 'LOW'
+                            logger.debug(f"ML marked safe: {event.event_type} ({score.reason})")
+                    
+                    event.details['local_analysis'] = local_analysis
+                
+                # Step 2: Only use OpenAI if hybrid detector is uncertain AND severity is HIGH+
+                ai_result = None
+                if should_use_openai and event.severity in ['HIGH', 'CRITICAL'] and self.use_ai:
+                    ai_result = self._analyze_event_with_ai(event)
+                    if ai_result:
+                        event.details['ai_analysis'] = ai_result
+                        if ai_result.get('is_false_positive'):
+                            event.severity = 'LOW'
+                            logger.info(f"OpenAI marked as false positive: {event.event_type}")
+                
+                # Step 3: Send to dashboard
                 try:
                     response = requests.post(
                         f"{self.api_base}/threats/analyze",
@@ -412,14 +542,18 @@ class WindowsAgent:
                             'description': event.description,
                             'payload': json.dumps(event.details),
                             'timestamp': event.timestamp,
-                            'agent_source': 'windows_agent'
+                            'agent_source': 'windows_agent',
+                            'ai_analyzed': ai_result is not None,
+                            'ml_analyzed': local_analysis is not None,
+                            'request_ai_analysis': should_use_openai and event.severity in ['HIGH', 'CRITICAL']
                         },
                         timeout=5
                     )
                     
                     if response.status_code == 200:
                         self.stats['events_sent'] += 1
-                        logger.info(f"Event sent: {event.event_type} - {event.description[:50]}")
+                        method = " [AI]" if ai_result else " [ML]" if local_analysis else ""
+                        logger.info(f"Event sent{method}: {event.event_type} - {event.description[:50]}")
                     else:
                         logger.warning(f"Failed to send event: {response.status_code}")
                         
@@ -1294,6 +1428,1092 @@ class WindowsAgent:
     
     # ============== END AVG INTEGRATION ==============
     
+    # ============== ADVANCED MONITORS ==============
+    
+    def _clipboard_monitor_loop(self):
+        """Monitor clipboard for sensitive data (passwords, API keys, crypto wallets)."""
+        try:
+            import win32clipboard
+            import win32con
+        except ImportError:
+            logger.info("Clipboard monitor requires pywin32 - install with: pip install pywin32")
+            return
+        
+        logger.info("Clipboard monitor started")
+        
+        # Sensitive data patterns
+        sensitive_patterns = [
+            (r'(?i)password\s*[:=]\s*\S+', 'password'),
+            (r'(?i)api[_-]?key\s*[:=]\s*[a-zA-Z0-9_-]{20,}', 'api_key'),
+            (r'(?i)secret\s*[:=]\s*\S+', 'secret'),
+            (r'(?i)token\s*[:=]\s*[a-zA-Z0-9_.-]{20,}', 'token'),
+            (r'(?i)bearer\s+[a-zA-Z0-9_.-]+', 'bearer_token'),
+            (r'AKIA[0-9A-Z]{16}', 'aws_access_key'),
+            (r'(?i)aws[_-]?secret[_-]?access[_-]?key\s*[:=]\s*\S+', 'aws_secret'),
+            (r'[13][a-km-zA-HJ-NP-Z1-9]{25,34}', 'bitcoin_address'),
+            (r'0x[a-fA-F0-9]{40}', 'ethereum_address'),
+            (r'-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----', 'private_key'),
+            (r'(?i)ssh-rsa\s+[A-Za-z0-9+/=]+', 'ssh_key'),
+        ]
+        
+        last_content = ""
+        
+        while self.running:
+            try:
+                time.sleep(5)  # Check every 5 seconds
+                
+                try:
+                    win32clipboard.OpenClipboard()
+                    if win32clipboard.IsClipboardFormatAvailable(win32con.CF_TEXT):
+                        content = win32clipboard.GetClipboardData(win32con.CF_TEXT)
+                        if isinstance(content, bytes):
+                            content = content.decode('utf-8', errors='ignore')
+                    elif win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT):
+                        content = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
+                    else:
+                        content = ""
+                    win32clipboard.CloseClipboard()
+                except:
+                    content = ""
+                
+                if content and content != last_content:
+                    last_content = content
+                    
+                    # Check for sensitive patterns
+                    for pattern, data_type in sensitive_patterns:
+                        if re.search(pattern, content):
+                            event = SecurityEvent(
+                                timestamp=datetime.utcnow().isoformat(),
+                                event_type="clipboard_sensitive_data",
+                                severity="HIGH",
+                                source="clipboard",
+                                description=f"Sensitive data detected in clipboard: {data_type}",
+                                details={
+                                    "data_type": data_type,
+                                    "preview": content[:50] + "..." if len(content) > 50 else content
+                                }
+                            )
+                            self.event_queue.put(event)
+                            logger.warning(f"Sensitive data in clipboard: {data_type}")
+                            break  # Only report once per clipboard change
+                            
+            except Exception as e:
+                logger.debug(f"Clipboard monitor error: {e}")
+    
+    def _dns_monitor_loop(self):
+        """Monitor DNS queries for tunneling and suspicious domains."""
+        logger.info("DNS monitor started")
+        
+        # Suspicious domain patterns
+        suspicious_tlds = ['.tk', '.ml', '.ga', '.cf', '.gq', '.xyz', '.top', '.work', '.click']
+        suspicious_patterns = [
+            r'[a-z0-9]{50,}\.', # Very long subdomain (possible DNS tunneling) - increased threshold
+            r'[a-f0-9]{40,}\.',  # Hex-encoded data in subdomain
+        ]
+        
+        # Safe patterns to ignore
+        safe_patterns = [
+            r'\.in-addr\.arpa',  # Reverse DNS lookups are normal
+            r'\.ip6\.arpa',      # IPv6 reverse DNS
+            r'localhost',
+            r'microsoft\.com',
+            r'windows\.com',
+            r'windowsupdate\.com',
+            r'azure\.com',
+            r'cloudflare',
+            r'google\.com',
+            r'googleapis\.com',
+            r'gstatic\.com',
+        ]
+        
+        # Known malicious domains (sample list)
+        known_bad_domains = [
+            'malware.com', 'evil.com', 'c2server.net',
+        ]
+        
+        # Track DNS cache to detect new queries
+        last_dns_cache = set()
+        
+        while self.running:
+            try:
+                time.sleep(30)  # Check every 30 seconds
+                
+                # Get DNS cache using ipconfig
+                result = subprocess.run(
+                    ['ipconfig', '/displaydns'],
+                    capture_output=True, text=True, timeout=30
+                )
+                
+                if result.returncode == 0:
+                    current_domains = set()
+                    
+                    for line in result.stdout.split('\n'):
+                        if 'Record Name' in line:
+                            domain = line.split(':')[-1].strip().lower()
+                            if domain:
+                                current_domains.add(domain)
+                    
+                    new_domains = current_domains - last_dns_cache
+                    
+                    for domain in new_domains:
+                        is_suspicious = False
+                        reason = ""
+                        
+                        # Check TLD
+                        for tld in suspicious_tlds:
+                            if domain.endswith(tld):
+                                is_suspicious = True
+                                reason = f"Suspicious TLD: {tld}"
+                                break
+                        
+                        # Skip safe patterns first
+                        is_safe = False
+                        for safe in safe_patterns:
+                            if re.search(safe, domain, re.IGNORECASE):
+                                is_safe = True
+                                break
+                        
+                        if is_safe:
+                            continue
+                        
+                        # Check patterns (DNS tunneling indicators)
+                        if not is_suspicious:
+                            for pattern in suspicious_patterns:
+                                if re.search(pattern, domain):
+                                    is_suspicious = True
+                                    reason = "Possible DNS tunneling"
+                                    break
+                        
+                        # Check known bad domains
+                        if not is_suspicious:
+                            for bad in known_bad_domains:
+                                if bad in domain:
+                                    is_suspicious = True
+                                    reason = "Known malicious domain"
+                                    break
+                        
+                        if is_suspicious:
+                            event = SecurityEvent(
+                                timestamp=datetime.utcnow().isoformat(),
+                                event_type="suspicious_dns_query",
+                                severity="MEDIUM",
+                                source="dns",
+                                description=f"Suspicious DNS query: {domain}",
+                                details={
+                                    "domain": domain,
+                                    "reason": reason
+                                }
+                            )
+                            self.event_queue.put(event)
+                            logger.warning(f"Suspicious DNS: {domain} - {reason}")
+                    
+                    last_dns_cache = current_domains
+                    
+            except Exception as e:
+                logger.debug(f"DNS monitor error: {e}")
+    
+    def _powershell_monitor_loop(self):
+        """Monitor PowerShell script block logging via Event Log."""
+        logger.info("PowerShell monitor started")
+        
+        # Suspicious PowerShell patterns
+        suspicious_ps_patterns = [
+            r'(?i)invoke-expression',
+            r'(?i)invoke-command',
+            r'(?i)invoke-webrequest',
+            r'(?i)downloadstring',
+            r'(?i)downloadfile',
+            r'(?i)start-bitstransfer',
+            r'(?i)iex\s*\(',
+            r'(?i)new-object\s+net\.webclient',
+            r'(?i)-enc\s+[a-zA-Z0-9+/=]+',
+            r'(?i)-encodedcommand',
+            r'(?i)frombase64string',
+            r'(?i)bypass\s+-nop',
+            r'(?i)-windowstyle\s+hidden',
+            r'(?i)add-type.*dllimport',
+            r'(?i)reflection\.assembly',
+            r'(?i)mimikatz',
+            r'(?i)invoke-mimikatz',
+            r'(?i)get-credential',
+            r'(?i)convertto-securestring',
+        ]
+        
+        try:
+            import win32evtlog
+        except ImportError:
+            logger.info("PowerShell monitor requires pywin32")
+            return
+        
+        last_record = 0
+        
+        while self.running:
+            try:
+                time.sleep(10)  # Check every 10 seconds
+                
+                # Read PowerShell Operational log (Event ID 4104 = Script Block)
+                try:
+                    hand = win32evtlog.OpenEventLog(None, "Microsoft-Windows-PowerShell/Operational")
+                    flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+                    
+                    events = win32evtlog.ReadEventLog(hand, flags, 0)
+                    
+                    for event in events:
+                        if event.RecordNumber <= last_record:
+                            continue
+                        
+                        last_record = max(last_record, event.RecordNumber)
+                        
+                        # Event ID 4104 is Script Block Logging
+                        if event.EventID == 4104:
+                            script_block = str(event.StringInserts) if event.StringInserts else ""
+                            
+                            for pattern in suspicious_ps_patterns:
+                                if re.search(pattern, script_block):
+                                    event_obj = SecurityEvent(
+                                        timestamp=datetime.utcnow().isoformat(),
+                                        event_type="suspicious_powershell",
+                                        severity="HIGH",
+                                        source="powershell",
+                                        description=f"Suspicious PowerShell execution detected",
+                                        details={
+                                            "pattern_matched": pattern,
+                                            "script_preview": script_block[:500]
+                                        }
+                                    )
+                                    self.event_queue.put(event_obj)
+                                    logger.warning(f"Suspicious PowerShell: {pattern}")
+                                    break
+                    
+                    win32evtlog.CloseEventLog(hand)
+                    
+                except Exception as e:
+                    logger.debug(f"PowerShell log read error: {e}")
+                    
+            except Exception as e:
+                logger.debug(f"PowerShell monitor error: {e}")
+    
+    def _wmi_monitor_loop(self):
+        """Monitor WMI event subscriptions for persistence."""
+        logger.info("WMI monitor started")
+        
+        known_subscriptions = set()
+        
+        def get_wmi_subscriptions():
+            """Get WMI event subscriptions."""
+            subs = set()
+            try:
+                # Query for WMI event consumers
+                result = subprocess.run([
+                    'wmic', 'path', '__EventConsumer', 'get', 'Name', '/format:list'
+                ], capture_output=True, text=True, timeout=30)
+                
+                if result.returncode == 0:
+                    for line in result.stdout.split('\n'):
+                        if 'Name=' in line:
+                            name = line.split('=')[-1].strip()
+                            if name:
+                                subs.add(f"consumer:{name}")
+                
+                # Query for event filters
+                result = subprocess.run([
+                    'wmic', 'path', '__EventFilter', 'get', 'Name', '/format:list'
+                ], capture_output=True, text=True, timeout=30)
+                
+                if result.returncode == 0:
+                    for line in result.stdout.split('\n'):
+                        if 'Name=' in line:
+                            name = line.split('=')[-1].strip()
+                            if name:
+                                subs.add(f"filter:{name}")
+                                
+            except Exception as e:
+                logger.debug(f"WMI query error: {e}")
+            
+            return subs
+        
+        known_subscriptions = get_wmi_subscriptions()
+        
+        while self.running:
+            try:
+                time.sleep(120)  # Check every 2 minutes
+                
+                current_subs = get_wmi_subscriptions()
+                new_subs = current_subs - known_subscriptions
+                
+                for sub in new_subs:
+                    # Skip known system subscriptions
+                    if any(x in sub.lower() for x in ['microsoft', 'windows', 'scm event']):
+                        continue
+                    
+                    event = SecurityEvent(
+                        timestamp=datetime.utcnow().isoformat(),
+                        event_type="wmi_subscription_created",
+                        severity="HIGH",
+                        source="wmi",
+                        description=f"New WMI event subscription: {sub}",
+                        details={"subscription": sub}
+                    )
+                    self.event_queue.put(event)
+                    logger.warning(f"New WMI subscription: {sub}")
+                
+                known_subscriptions = current_subs
+                
+            except Exception as e:
+                logger.debug(f"WMI monitor error: {e}")
+    
+    def _service_monitor_loop(self):
+        """Monitor for new Windows services (persistence mechanism)."""
+        logger.info("Service monitor started")
+        
+        known_services = set()
+        
+        def get_services():
+            """Get list of Windows services."""
+            services = set()
+            try:
+                result = subprocess.run(
+                    ['sc', 'query', 'state=', 'all'],
+                    capture_output=True, text=True, timeout=30
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.split('\n'):
+                        if 'SERVICE_NAME:' in line:
+                            name = line.split(':')[-1].strip()
+                            if name:
+                                services.add(name)
+            except Exception as e:
+                logger.debug(f"Service query error: {e}")
+            return services
+        
+        known_services = get_services()
+        logger.info(f"Service monitor tracking {len(known_services)} services")
+        
+        while self.running:
+            try:
+                time.sleep(60)  # Check every minute
+                
+                current_services = get_services()
+                new_services = current_services - known_services
+                
+                for service in new_services:
+                    # Skip common system services
+                    if any(x in service.lower() for x in ['windows', 'microsoft', 'wmi', 'dcom']):
+                        continue
+                    
+                    # Get service details
+                    details = {}
+                    try:
+                        result = subprocess.run(
+                            ['sc', 'qc', service],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        if result.returncode == 0:
+                            for line in result.stdout.split('\n'):
+                                if 'BINARY_PATH_NAME' in line:
+                                    details['binary_path'] = line.split(':')[-1].strip()
+                                elif 'START_TYPE' in line:
+                                    details['start_type'] = line.split(':')[-1].strip()
+                    except:
+                        pass
+                    
+                    event = SecurityEvent(
+                        timestamp=datetime.utcnow().isoformat(),
+                        event_type="new_service_created",
+                        severity="HIGH",
+                        source="services",
+                        description=f"New Windows service created: {service}",
+                        details={
+                            "service_name": service,
+                            **details
+                        }
+                    )
+                    self.event_queue.put(event)
+                    logger.warning(f"New service: {service}")
+                
+                known_services = current_services
+                
+            except Exception as e:
+                logger.debug(f"Service monitor error: {e}")
+    
+    def _driver_monitor_loop(self):
+        """Monitor for new driver loading (rootkit detection)."""
+        logger.info("Driver monitor started")
+        
+        known_drivers = set()
+        
+        def get_drivers():
+            """Get list of loaded drivers."""
+            drivers = set()
+            try:
+                result = subprocess.run(
+                    ['driverquery', '/fo', 'csv', '/nh'],
+                    capture_output=True, text=True, timeout=30
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.split('\n'):
+                        if line.strip():
+                            parts = line.split(',')
+                            if parts:
+                                driver_name = parts[0].strip('"')
+                                if driver_name:
+                                    drivers.add(driver_name)
+            except Exception as e:
+                logger.debug(f"Driver query error: {e}")
+            return drivers
+        
+        known_drivers = get_drivers()
+        logger.info(f"Driver monitor tracking {len(known_drivers)} drivers")
+        
+        while self.running:
+            try:
+                time.sleep(120)  # Check every 2 minutes
+                
+                current_drivers = get_drivers()
+                new_drivers = current_drivers - known_drivers
+                
+                for driver in new_drivers:
+                    # Skip common system drivers
+                    if any(x in driver.lower() for x in ['microsoft', 'windows', 'intel', 'nvidia', 'amd', 'realtek']):
+                        continue
+                    
+                    event = SecurityEvent(
+                        timestamp=datetime.utcnow().isoformat(),
+                        event_type="new_driver_loaded",
+                        severity="HIGH",
+                        source="drivers",
+                        description=f"New driver loaded: {driver}",
+                        details={"driver_name": driver}
+                    )
+                    self.event_queue.put(event)
+                    logger.warning(f"New driver: {driver}")
+                
+                known_drivers = current_drivers
+                
+            except Exception as e:
+                logger.debug(f"Driver monitor error: {e}")
+    
+    def _firewall_rule_monitor_loop(self):
+        """Monitor for unauthorized firewall rule changes."""
+        logger.info("Firewall rule monitor started")
+        
+        known_rules = set()
+        
+        def get_firewall_rules():
+            """Get list of firewall rules."""
+            rules = set()
+            try:
+                result = subprocess.run(
+                    ['netsh', 'advfirewall', 'firewall', 'show', 'rule', 'name=all'],
+                    capture_output=True, text=True, timeout=60
+                )
+                if result.returncode == 0:
+                    current_rule = None
+                    for line in result.stdout.split('\n'):
+                        if 'Rule Name:' in line:
+                            current_rule = line.split(':')[-1].strip()
+                            if current_rule:
+                                rules.add(current_rule)
+            except Exception as e:
+                logger.debug(f"Firewall query error: {e}")
+            return rules
+        
+        known_rules = get_firewall_rules()
+        logger.info(f"Firewall monitor tracking {len(known_rules)} rules")
+        
+        while self.running:
+            try:
+                time.sleep(60)  # Check every minute
+                
+                current_rules = get_firewall_rules()
+                new_rules = current_rules - known_rules
+                removed_rules = known_rules - current_rules
+                
+                for rule in new_rules:
+                    # Skip our own rules
+                    if 'SentinelAI' in rule:
+                        continue
+                    
+                    event = SecurityEvent(
+                        timestamp=datetime.utcnow().isoformat(),
+                        event_type="firewall_rule_added",
+                        severity="MEDIUM",
+                        source="firewall",
+                        description=f"New firewall rule added: {rule}",
+                        details={"rule_name": rule}
+                    )
+                    self.event_queue.put(event)
+                    logger.info(f"New firewall rule: {rule}")
+                
+                for rule in removed_rules:
+                    if 'SentinelAI' in rule:
+                        continue
+                    
+                    event = SecurityEvent(
+                        timestamp=datetime.utcnow().isoformat(),
+                        event_type="firewall_rule_removed",
+                        severity="MEDIUM",
+                        source="firewall",
+                        description=f"Firewall rule removed: {rule}",
+                        details={"rule_name": rule}
+                    )
+                    self.event_queue.put(event)
+                    logger.warning(f"Firewall rule removed: {rule}")
+                
+                known_rules = current_rules
+                
+            except Exception as e:
+                logger.debug(f"Firewall monitor error: {e}")
+    
+    def _certificate_monitor_loop(self):
+        """Monitor Windows certificate store for rogue certificates."""
+        logger.info("Certificate monitor started")
+        
+        known_certs = set()
+        
+        def get_certificates():
+            """Get certificates from Windows store."""
+            certs = set()
+            try:
+                # Query root certificates
+                result = subprocess.run([
+                    'certutil', '-store', 'Root'
+                ], capture_output=True, text=True, timeout=30)
+                
+                if result.returncode == 0:
+                    for line in result.stdout.split('\n'):
+                        if 'Subject:' in line:
+                            subject = line.split('Subject:')[-1].strip()
+                            if subject:
+                                certs.add(f"root:{subject[:100]}")
+                
+                # Query CA certificates
+                result = subprocess.run([
+                    'certutil', '-store', 'CA'
+                ], capture_output=True, text=True, timeout=30)
+                
+                if result.returncode == 0:
+                    for line in result.stdout.split('\n'):
+                        if 'Subject:' in line:
+                            subject = line.split('Subject:')[-1].strip()
+                            if subject:
+                                certs.add(f"ca:{subject[:100]}")
+                                
+            except Exception as e:
+                logger.debug(f"Certificate query error: {e}")
+            return certs
+        
+        known_certs = get_certificates()
+        logger.info(f"Certificate monitor tracking {len(known_certs)} certificates")
+        
+        while self.running:
+            try:
+                time.sleep(300)  # Check every 5 minutes
+                
+                current_certs = get_certificates()
+                new_certs = current_certs - known_certs
+                
+                for cert in new_certs:
+                    event = SecurityEvent(
+                        timestamp=datetime.utcnow().isoformat(),
+                        event_type="new_certificate_installed",
+                        severity="HIGH",
+                        source="certificates",
+                        description=f"New certificate installed: {cert}",
+                        details={"certificate": cert}
+                    )
+                    self.event_queue.put(event)
+                    logger.warning(f"New certificate: {cert}")
+                
+                known_certs = current_certs
+                
+            except Exception as e:
+                logger.debug(f"Certificate monitor error: {e}")
+    
+    def _named_pipe_monitor_loop(self):
+        """Monitor named pipes for C2 communication channels."""
+        logger.info("Named pipe monitor started")
+        
+        # Known malicious pipe names (removed 'mojo' - it's Chrome IPC)
+        suspicious_pipes = [
+            'msagent_', 'isapi', 'postex_', 'status_',
+            'msse-', 'MSSE-', 'mssecsvc',
+            'cobaltstrike', 'beacon', 'metasploit'
+        ]
+        
+        # Safe pipe patterns to ignore
+        safe_pipe_patterns = [
+            'mojo.',           # Chrome/Chromium IPC
+            'chrome.',         # Chrome browser
+            'crashpad',        # Crash reporting
+            'discord',         # Discord app
+            'spotify',         # Spotify
+            'LOCAL\\mojo',    # Chrome mojo pipes
+            'GoogleUpdate',    # Google updater
+            'PIPE_EVENTROOT',  # Windows events
+        ]
+        
+        known_pipes = set()
+        
+        def get_named_pipes():
+            """Get list of named pipes."""
+            pipes = set()
+            try:
+                pipe_path = r'\\.\pipe\\'
+                if os.path.exists(r'\\.\pipe'):
+                    # Use dir command to list pipes
+                    result = subprocess.run(
+                        ['cmd', '/c', 'dir', r'\\.\pipe\\'],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    if result.returncode == 0:
+                        for line in result.stdout.split('\n'):
+                            parts = line.split()
+                            if parts and not any(x in line for x in ['<DIR>', 'Volume', 'Directory', 'File(s)', 'Dir(s)']):
+                                if len(parts) >= 4:
+                                    pipe_name = parts[-1]
+                                    if pipe_name and pipe_name != '.':
+                                        pipes.add(pipe_name)
+            except Exception as e:
+                logger.debug(f"Named pipe query error: {e}")
+            return pipes
+        
+        known_pipes = get_named_pipes()
+        
+        while self.running:
+            try:
+                time.sleep(30)  # Check every 30 seconds
+                
+                current_pipes = get_named_pipes()
+                new_pipes = current_pipes - known_pipes
+                
+                for pipe in new_pipes:
+                    # Skip safe pipes first
+                    is_safe = False
+                    for safe in safe_pipe_patterns:
+                        if safe.lower() in pipe.lower():
+                            is_safe = True
+                            break
+                    
+                    if is_safe:
+                        continue
+                    
+                    is_suspicious = False
+                    
+                    for sus_pattern in suspicious_pipes:
+                        if sus_pattern.lower() in pipe.lower():
+                            is_suspicious = True
+                            break
+                    
+                    if is_suspicious:
+                        event = SecurityEvent(
+                            timestamp=datetime.utcnow().isoformat(),
+                            event_type="suspicious_named_pipe",
+                            severity="HIGH",
+                            source="named_pipes",
+                            description=f"Suspicious named pipe detected: {pipe}",
+                            details={"pipe_name": pipe}
+                        )
+                        self.event_queue.put(event)
+                        logger.warning(f"Suspicious named pipe: {pipe}")
+                
+                known_pipes = current_pipes
+                
+            except Exception as e:
+                logger.debug(f"Named pipe monitor error: {e}")
+    
+    def _defender_monitor_loop(self):
+        """Monitor Windows Defender for threat detections."""
+        logger.info("Windows Defender monitor started")
+        
+        try:
+            import win32evtlog
+        except ImportError:
+            logger.info("Defender monitor requires pywin32")
+            return
+        
+        last_record = 0
+        
+        # Defender Event IDs
+        # 1116 = Malware detected
+        # 1117 = Action taken
+        # 1118 = Remediation failed
+        # 1119 = Critical failure
+        defender_event_ids = [1116, 1117, 1118, 1119]
+        
+        while self.running:
+            try:
+                time.sleep(30)  # Check every 30 seconds
+                
+                try:
+                    hand = win32evtlog.OpenEventLog(None, "Microsoft-Windows-Windows Defender/Operational")
+                    flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+                    
+                    events = win32evtlog.ReadEventLog(hand, flags, 0)
+                    
+                    for event in events:
+                        if event.RecordNumber <= last_record:
+                            continue
+                        
+                        last_record = max(last_record, event.RecordNumber)
+                        
+                        if event.EventID in defender_event_ids:
+                            severity = "HIGH"
+                            if event.EventID in [1118, 1119]:
+                                severity = "CRITICAL"
+                            
+                            event_obj = SecurityEvent(
+                                timestamp=datetime.utcnow().isoformat(),
+                                event_type="defender_detection",
+                                severity=severity,
+                                source="windows_defender",
+                                description=f"Windows Defender event: {event.EventID}",
+                                details={
+                                    "event_id": event.EventID,
+                                    "data": str(event.StringInserts)[:500] if event.StringInserts else ""
+                                }
+                            )
+                            self.event_queue.put(event_obj)
+                            logger.warning(f"Defender detection: Event {event.EventID}")
+                    
+                    win32evtlog.CloseEventLog(hand)
+                    
+                except Exception as e:
+                    logger.debug(f"Defender log read error: {e}")
+                    
+            except Exception as e:
+                logger.debug(f"Defender monitor error: {e}")
+    
+    # ============== AMSI, ETW, SYSMON, DLL INJECTION ==============
+    
+    def _amsi_monitor_loop(self):
+        """Monitor AMSI (Antimalware Scan Interface) events via Event Log."""
+        logger.info("AMSI monitor started")
+        
+        try:
+            import win32evtlog
+        except ImportError:
+            logger.info("AMSI monitor requires pywin32")
+            return
+        
+        last_record = 0
+        
+        # AMSI Event IDs in Microsoft-Windows-Windows Defender/Operational
+        # Event ID 1116 includes AMSI detections
+        
+        while self.running:
+            try:
+                time.sleep(15)  # Check every 15 seconds
+                
+                try:
+                    # AMSI events are logged to Windows Defender log
+                    hand = win32evtlog.OpenEventLog(None, "Microsoft-Windows-Windows Defender/Operational")
+                    flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+                    
+                    events = win32evtlog.ReadEventLog(hand, flags, 0)
+                    
+                    for event in events:
+                        if event.RecordNumber <= last_record:
+                            continue
+                        
+                        last_record = max(last_record, event.RecordNumber)
+                        
+                        # Event ID 1116 = AMSI detection
+                        if event.EventID == 1116:
+                            event_data = str(event.StringInserts) if event.StringInserts else ""
+                            
+                            # Check if it's an AMSI-specific detection
+                            if 'AMSI' in event_data or 'script' in event_data.lower():
+                                event_obj = SecurityEvent(
+                                    timestamp=datetime.utcnow().isoformat(),
+                                    event_type="amsi_detection",
+                                    severity="HIGH",
+                                    source="amsi",
+                                    description="AMSI detected malicious content",
+                                    details={
+                                        "event_id": event.EventID,
+                                        "data": event_data[:500]
+                                    }
+                                )
+                                self.event_queue.put(event_obj)
+                                logger.warning(f"AMSI detection: {event_data[:100]}")
+                    
+                    win32evtlog.CloseEventLog(hand)
+                    
+                except Exception as e:
+                    logger.debug(f"AMSI log read error: {e}")
+                    
+            except Exception as e:
+                logger.debug(f"AMSI monitor error: {e}")
+    
+    def _etw_monitor_loop(self):
+        """Monitor ETW (Event Tracing for Windows) for security events."""
+        logger.info("ETW monitor started")
+        
+        try:
+            import win32evtlog
+        except ImportError:
+            logger.info("ETW monitor requires pywin32")
+            return
+        
+        last_records = {}
+        
+        # ETW providers to monitor
+        etw_logs = [
+            ("Microsoft-Windows-Security-Auditing", [4688, 4689]),  # Process creation/termination
+            ("Microsoft-Windows-Sysmon/Operational", [1, 3, 7, 8, 10, 11]),  # Sysmon events
+            ("Microsoft-Windows-PowerShell/Operational", [4103, 4104]),  # PowerShell
+            ("Microsoft-Windows-TaskScheduler/Operational", [106, 140, 141]),  # Task scheduler
+        ]
+        
+        while self.running:
+            try:
+                time.sleep(20)  # Check every 20 seconds
+                
+                for log_name, event_ids in etw_logs:
+                    try:
+                        hand = win32evtlog.OpenEventLog(None, log_name)
+                        flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+                        
+                        events = win32evtlog.ReadEventLog(hand, flags, 0)
+                        last_record = last_records.get(log_name, 0)
+                        
+                        for event in events:
+                            if event.RecordNumber <= last_record:
+                                continue
+                            
+                            last_records[log_name] = max(last_records.get(log_name, 0), event.RecordNumber)
+                            
+                            if event.EventID in event_ids:
+                                event_data = str(event.StringInserts) if event.StringInserts else ""
+                                
+                                # Determine severity based on event type
+                                severity = "MEDIUM"
+                                if event.EventID in [4688, 1]:  # Process creation
+                                    # Check for suspicious processes
+                                    if any(x in event_data.lower() for x in ['powershell', 'cmd', 'wscript', 'cscript', 'mshta']):
+                                        severity = "HIGH"
+                                
+                                event_obj = SecurityEvent(
+                                    timestamp=datetime.utcnow().isoformat(),
+                                    event_type="etw_event",
+                                    severity=severity,
+                                    source="etw",
+                                    description=f"ETW Event {event.EventID} from {log_name}",
+                                    details={
+                                        "log_name": log_name,
+                                        "event_id": event.EventID,
+                                        "data": event_data[:500]
+                                    }
+                                )
+                                self.event_queue.put(event_obj)
+                        
+                        win32evtlog.CloseEventLog(hand)
+                        
+                    except Exception as e:
+                        logger.debug(f"ETW log {log_name} error: {e}")
+                        
+            except Exception as e:
+                logger.debug(f"ETW monitor error: {e}")
+    
+    def _sysmon_monitor_loop(self):
+        """Monitor Sysmon logs for detailed security events."""
+        logger.info("Sysmon monitor started")
+        
+        try:
+            import win32evtlog
+        except ImportError:
+            logger.info("Sysmon monitor requires pywin32")
+            return
+        
+        last_record = 0
+        
+        # Sysmon Event IDs
+        # 1 = Process creation
+        # 3 = Network connection
+        # 7 = Image loaded (DLL)
+        # 8 = CreateRemoteThread (injection)
+        # 10 = ProcessAccess (credential dumping)
+        # 11 = FileCreate
+        # 12/13/14 = Registry events
+        # 22 = DNS query
+        sysmon_events = {
+            1: ("process_create", "MEDIUM"),
+            3: ("network_connect", "LOW"),
+            7: ("image_load", "LOW"),
+            8: ("remote_thread", "HIGH"),  # Potential injection
+            10: ("process_access", "HIGH"),  # Potential credential dump
+            11: ("file_create", "LOW"),
+            12: ("registry_add", "MEDIUM"),
+            13: ("registry_set", "MEDIUM"),
+            14: ("registry_rename", "MEDIUM"),
+            22: ("dns_query", "LOW"),
+        }
+        
+        while self.running:
+            try:
+                time.sleep(10)  # Check every 10 seconds
+                
+                try:
+                    hand = win32evtlog.OpenEventLog(None, "Microsoft-Windows-Sysmon/Operational")
+                    flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+                    
+                    events = win32evtlog.ReadEventLog(hand, flags, 0)
+                    
+                    for event in events:
+                        if event.RecordNumber <= last_record:
+                            continue
+                        
+                        last_record = max(last_record, event.RecordNumber)
+                        
+                        if event.EventID in sysmon_events:
+                            event_type, base_severity = sysmon_events[event.EventID]
+                            event_data = str(event.StringInserts) if event.StringInserts else ""
+                            
+                            # Elevate severity for suspicious patterns
+                            severity = base_severity
+                            if event.EventID == 1:  # Process creation
+                                if any(x in event_data.lower() for x in ['mimikatz', 'procdump', 'lazagne', 'secretsdump']):
+                                    severity = "CRITICAL"
+                                elif any(x in event_data.lower() for x in ['-enc', 'downloadstring', 'invoke-']):
+                                    severity = "HIGH"
+                            
+                            if event.EventID == 8:  # Remote thread - always suspicious
+                                severity = "HIGH"
+                            
+                            if event.EventID == 10:  # Process access to lsass
+                                if 'lsass' in event_data.lower():
+                                    severity = "CRITICAL"
+                            
+                            # Only report HIGH/CRITICAL or specific events
+                            if severity in ["HIGH", "CRITICAL"] or event.EventID in [8, 10]:
+                                event_obj = SecurityEvent(
+                                    timestamp=datetime.utcnow().isoformat(),
+                                    event_type=f"sysmon_{event_type}",
+                                    severity=severity,
+                                    source="sysmon",
+                                    description=f"Sysmon: {event_type} (Event {event.EventID})",
+                                    details={
+                                        "event_id": event.EventID,
+                                        "event_type": event_type,
+                                        "data": event_data[:500]
+                                    }
+                                )
+                                self.event_queue.put(event_obj)
+                                logger.warning(f"Sysmon {event_type}: {event_data[:100]}")
+                    
+                    win32evtlog.CloseEventLog(hand)
+                    
+                except Exception as e:
+                    # Sysmon may not be installed
+                    if "cannot find" not in str(e).lower():
+                        logger.debug(f"Sysmon log read error: {e}")
+                    
+            except Exception as e:
+                logger.debug(f"Sysmon monitor error: {e}")
+    
+    def _dll_injection_monitor_loop(self):
+        """Monitor for DLL injection attempts."""
+        logger.info("DLL injection monitor started")
+        
+        # Track loaded DLLs per process
+        process_dlls = {}
+        
+        # Suspicious DLL patterns
+        suspicious_dll_patterns = [
+            r'temp.*\.dll$',
+            r'appdata.*\.dll$',
+            r'[a-f0-9]{8,}\.dll$',  # Random hex names
+            r'\\users\\.*\\downloads\\.*\.dll$',
+        ]
+        
+        # Known injection techniques leave these DLLs
+        injection_indicators = [
+            'ntdll.dll',  # When loaded multiple times
+            'kernel32.dll',
+            'clr.dll',  # .NET injection
+            'mscoree.dll',
+        ]
+        
+        while self.running:
+            try:
+                time.sleep(30)  # Check every 30 seconds
+                
+                for proc in psutil.process_iter(['pid', 'name']):
+                    try:
+                        pid = proc.info['pid']
+                        proc_name = proc.info['name']
+                        
+                        # Skip system processes
+                        if pid < 100:
+                            continue
+                        
+                        # Get memory maps (loaded DLLs)
+                        try:
+                            p = psutil.Process(pid)
+                            memory_maps = p.memory_maps()
+                            
+                            current_dlls = set()
+                            for mmap in memory_maps:
+                                if mmap.path and mmap.path.lower().endswith('.dll'):
+                                    current_dlls.add(mmap.path.lower())
+                            
+                            # Check for new DLLs since last scan
+                            if pid in process_dlls:
+                                new_dlls = current_dlls - process_dlls[pid]
+                                
+                                for dll in new_dlls:
+                                    is_suspicious = False
+                                    reason = ""
+                                    
+                                    # Check suspicious patterns
+                                    for pattern in suspicious_dll_patterns:
+                                        if re.search(pattern, dll, re.IGNORECASE):
+                                            is_suspicious = True
+                                            reason = f"Suspicious DLL path pattern: {pattern}"
+                                            break
+                                    
+                                    # Check for unsigned DLLs in unusual locations
+                                    if not is_suspicious:
+                                        if '\\temp\\' in dll or '\\appdata\\' in dll:
+                                            if not any(x in dll for x in ['microsoft', 'windows', 'google', 'mozilla']):
+                                                is_suspicious = True
+                                                reason = "DLL loaded from temp/appdata"
+                                    
+                                    if is_suspicious:
+                                        event = SecurityEvent(
+                                            timestamp=datetime.utcnow().isoformat(),
+                                            event_type="dll_injection_suspected",
+                                            severity="HIGH",
+                                            source="dll_monitor",
+                                            description=f"Suspicious DLL loaded into {proc_name}",
+                                            details={
+                                                "process_name": proc_name,
+                                                "pid": pid,
+                                                "dll_path": dll,
+                                                "reason": reason
+                                            }
+                                        )
+                                        self.event_queue.put(event)
+                                        logger.warning(f"Suspicious DLL: {dll} in {proc_name}")
+                            
+                            process_dlls[pid] = current_dlls
+                            
+                        except (psutil.AccessDenied, psutil.NoSuchProcess):
+                            pass
+                            
+                    except Exception as e:
+                        pass
+                
+                # Cleanup dead processes
+                active_pids = {p.pid for p in psutil.process_iter()}
+                process_dlls = {k: v for k, v in process_dlls.items() if k in active_pids}
+                        
+            except Exception as e:
+                logger.debug(f"DLL injection monitor error: {e}")
+    
+    # ============== END ADVANCED MONITORS ==============
+    
     def block_ip(self, ip: str) -> bool:
         """Block an IP address using Windows Firewall."""
         if ip in self.blocked_ips:
@@ -1356,16 +2576,18 @@ def main():
     ai_status = "DISABLED" if args.no_ai else "ENABLED"
     
     print(f"""
-    ╔═══════════════════════════════════════════════════════════╗
-    ║           SentinelAI Windows Agent v1.3                   ║
-    ║     Native Windows Protection & Threat Detection          ║
-    ║                                                           ║
-    ║  Monitors: Process | Network | EventLog | Registry        ║
-    ║            Startup | Tasks | USB | Hosts | Browser        ║
-    ║            AVG Antivirus Integration                      ║
-    ║                                                           ║
-    ║     AI Analysis: {ai_status:^10}                            ║
-    ╚═══════════════════════════════════════════════════════════╝
+    ╔═══════════════════════════════════════════════════════════════════╗
+    ║               SentinelAI Windows Agent v1.4                       ║
+    ║         Native Windows Protection & Threat Detection              ║
+    ║                                                                   ║
+    ║  Core:     Process | Network | EventLog | Registry | Firewall     ║
+    ║  System:   Startup | Tasks | USB | Hosts | Browser | Services     ║
+    ║  Advanced: Clipboard | DNS | PowerShell | WMI | Drivers           ║
+    ║  Security: Certificates | Named Pipes | Defender | AVG            ║
+    ║  Deep:     AMSI | ETW | Sysmon | DLL Injection Detection          ║
+    ║                                                                   ║
+    ║     AI Analysis: {ai_status:^10}    |    25 Active Monitors         ║
+    ╚═══════════════════════════════════════════════════════════════════╝
     """)
     
     agent = WindowsAgent(dashboard_url=args.dashboard)

@@ -1,3 +1,4 @@
 # SentinelAI Windows Agent Dependencies
 psutil>=5.9.0
 requests>=2.28.0
+pywin32>=306  # For advanced Windows monitoring (Clipboard, PowerShell, AMSI, ETW, Sysmon)

@@ -550,6 +550,88 @@
                     </div>
                 </div>
             </div>
+            
+            <!-- Settings Page (hidden by default) -->
+            <div id="settings-page" class="page-content" style="display: none;">
+                <div class="events-card">
+                    <div class="events-header">
+                        <div class="events-title">
+                            <i class="bi bi-gear me-2"></i>Settings
+                        </div>
+                    </div>
+                    <div style="padding: 20px;">
+                        <!-- Startup Settings -->
+                        <div class="mb-4">
+                            <h6 style="color: var(--highlight); margin-bottom: 15px;">
+                                <i class="bi bi-power me-2"></i>Startup
+                            </h6>
+                            <div class="form-check form-switch mb-3">
+                                <input class="form-check-input" type="checkbox" id="autostart-toggle">
+                                <label class="form-check-label" for="autostart-toggle">
+                                    Start SentinelAI on Windows startup
+                                </label>
+                            </div>
+                            <div class="form-check form-switch mb-3">
+                                <input class="form-check-input" type="checkbox" id="auto-start-agent" checked>
+                                <label class="form-check-label" for="auto-start-agent">
+                                    Auto-start agent when app opens
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <!-- Detection Settings -->
+                        <div class="mb-4">
+                            <h6 style="color: var(--highlight); margin-bottom: 15px;">
+                                <i class="bi bi-cpu me-2"></i>Detection
+                            </h6>
+                            <div class="form-check form-switch mb-3">
+                                <input class="form-check-input" type="checkbox" id="ai-analysis-toggle" checked>
+                                <label class="form-check-label" for="ai-analysis-toggle">
+                                    Enable AI-powered threat analysis (uses OpenAI)
+                                </label>
+                            </div>
+                            <div class="form-check form-switch mb-3">
+                                <input class="form-check-input" type="checkbox" id="ml-detection-toggle" checked>
+                                <label class="form-check-label" for="ml-detection-toggle">
+                                    Enable local ML detection (faster, no API cost)
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <!-- Dashboard Settings -->
+                        <div class="mb-4">
+                            <h6 style="color: var(--highlight); margin-bottom: 15px;">
+                                <i class="bi bi-cloud me-2"></i>Dashboard Connection
+                            </h6>
+                            <div class="mb-3">
+                                <label class="form-label">Dashboard URL</label>
+                                <input type="text" class="form-control" id="dashboard-url" 
+                                       style="background: var(--accent); color: var(--text); border: 1px solid var(--accent);"
+                                       value="http://localhost:8015">
+                            </div>
+                        </div>
+                        
+                        <!-- About -->
+                        <div class="mb-4">
+                            <h6 style="color: var(--highlight); margin-bottom: 15px;">
+                                <i class="bi bi-info-circle me-2"></i>About
+                            </h6>
+                            <p style="opacity: 0.7; font-size: 13px;">
+                                <strong>SentinelAI Desktop v1.4.0</strong><br>
+                                Hybrid ML/AI-powered threat detection<br>
+                                25 active security monitors<br>
+                                <br>
+                                <i class="bi bi-github me-1"></i>
+                                <a href="#" onclick="openGitHub()" style="color: var(--highlight);">View on GitHub</a>
+                            </p>
+                        </div>
+                        
+                        <button class="btn-sentinel" id="save-settings-btn">
+                            <i class="bi bi-check-lg me-2"></i>Save Settings
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
     

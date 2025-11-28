@@ -4,6 +4,11 @@ echo   SentinelAI Windows Agent
 echo ============================================
 echo.
 
+:: Kill any existing agent processes to prevent duplicates
+echo Stopping any existing agents...
+taskkill /F /IM python.exe /FI "WINDOWTITLE eq SentinelAI*" 2>nul
+timeout /t 2 /nobreak >nul
+
 :: Check if venv exists
 if not exist "venv\Scripts\activate.bat" (
     echo Creating virtual environment...
