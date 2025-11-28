@@ -28,6 +28,23 @@ if platform.system() != "Windows":
 import psutil
 import requests
 
+def safe_subprocess_run(cmd, **kwargs):
+    """Run subprocess with proper encoding to avoid UnicodeDecodeError on Windows."""
+    # Set encoding to utf-8 with error handling
+    kwargs.setdefault('encoding', 'utf-8')
+    kwargs.setdefault('errors', 'replace')  # Replace undecodable chars
+    kwargs.setdefault('capture_output', True)
+    
+    # Remove text=True if present since we're using encoding
+    kwargs.pop('text', None)
+    
+    try:
+        return safe_subprocess_run(cmd, **kwargs)
+    except UnicodeDecodeError:
+        # Fallback: try with latin-1 which can decode any byte
+        kwargs['encoding'] = 'latin-1'
+        return safe_subprocess_run(cmd, **kwargs)
+
 # Import local ML detector
 try:
     from ml_detector import HybridThreatDetector, get_detector
@@ -792,10 +809,8 @@ class WindowsAgent:
                 ConvertTo-Json
                 '''
                 
-                result = subprocess.run(
+                result = safe_subprocess_run(
                     ['powershell', '-Command', ps_command],
-                    capture_output=True,
-                    text=True,
                     timeout=30
                 )
                 
@@ -1016,9 +1031,9 @@ class WindowsAgent:
             """Get list of scheduled tasks."""
             tasks = set()
             try:
-                result = subprocess.run(
+                result = safe_subprocess_run(
                     ['schtasks', '/query', '/fo', 'csv', '/nh'],
-                    capture_output=True, text=True, timeout=30
+                    timeout=30
                 )
                 if result.returncode == 0:
                     for line in result.stdout.strip().split('\n'):
@@ -1072,9 +1087,9 @@ class WindowsAgent:
             """Get connected USB devices."""
             devices = set()
             try:
-                result = subprocess.run(
+                result = safe_subprocess_run(
                     ['wmic', 'path', 'Win32_USBControllerDevice', 'get', 'Dependent'],
-                    capture_output=True, text=True, timeout=10
+                    capture_output=True, timeout=10
                 )
                 if result.returncode == 0:
                     for line in result.stdout.strip().split('\n'):
@@ -1539,9 +1554,9 @@ class WindowsAgent:
                 time.sleep(30)  # Check every 30 seconds
                 
                 # Get DNS cache using ipconfig
-                result = subprocess.run(
+                result = safe_subprocess_run(
                     ['ipconfig', '/displaydns'],
-                    capture_output=True, text=True, timeout=30
+                    capture_output=True, timeout=30
                 )
                 
                 if result.returncode == 0:
@@ -1704,9 +1719,9 @@ class WindowsAgent:
             subs = set()
             try:
                 # Query for WMI event consumers
-                result = subprocess.run([
+                result = safe_subprocess_run([
                     'wmic', 'path', '__EventConsumer', 'get', 'Name', '/format:list'
-                ], capture_output=True, text=True, timeout=30)
+                ], capture_output=True, timeout=30)
                 
                 if result.returncode == 0:
                     for line in result.stdout.split('\n'):
@@ -1716,9 +1731,9 @@ class WindowsAgent:
                                 subs.add(f"consumer:{name}")
                 
                 # Query for event filters
-                result = subprocess.run([
+                result = safe_subprocess_run([
                     'wmic', 'path', '__EventFilter', 'get', 'Name', '/format:list'
-                ], capture_output=True, text=True, timeout=30)
+                ], capture_output=True, timeout=30)
                 
                 if result.returncode == 0:
                     for line in result.stdout.split('\n'):
@@ -1772,9 +1787,9 @@ class WindowsAgent:
             """Get list of Windows services."""
             services = set()
             try:
-                result = subprocess.run(
+                result = safe_subprocess_run(
                     ['sc', 'query', 'state=', 'all'],
-                    capture_output=True, text=True, timeout=30
+                    capture_output=True, timeout=30
                 )
                 if result.returncode == 0:
                     for line in result.stdout.split('\n'):
@@ -1804,9 +1819,9 @@ class WindowsAgent:
                     # Get service details
                     details = {}
                     try:
-                        result = subprocess.run(
+                        result = safe_subprocess_run(
                             ['sc', 'qc', service],
-                            capture_output=True, text=True, timeout=10
+                            capture_output=True, timeout=10
                         )
                         if result.returncode == 0:
                             for line in result.stdout.split('\n'):
@@ -1846,9 +1861,9 @@ class WindowsAgent:
             """Get list of loaded drivers."""
             drivers = set()
             try:
-                result = subprocess.run(
+                result = safe_subprocess_run(
                     ['driverquery', '/fo', 'csv', '/nh'],
-                    capture_output=True, text=True, timeout=30
+                    capture_output=True, timeout=30
                 )
                 if result.returncode == 0:
                     for line in result.stdout.split('\n'):
@@ -1872,9 +1887,22 @@ class WindowsAgent:
                 current_drivers = get_drivers()
                 new_drivers = current_drivers - known_drivers
                 
+                # Only log if there are truly suspicious new drivers (not just system enumeration)
+                # Skip the first scan cycle to avoid flooding
+                if not hasattr(self, '_driver_first_scan_done'):
+                    self._driver_first_scan_done = True
+                    known_drivers = current_drivers
+                    continue
+                
                 for driver in new_drivers:
-                    # Skip common system drivers
-                    if any(x in driver.lower() for x in ['microsoft', 'windows', 'intel', 'nvidia', 'amd', 'realtek']):
+                    # Skip common system drivers and known vendors
+                    driver_lower = driver.lower()
+                    safe_vendors = ['microsoft', 'windows', 'intel', 'nvidia', 'amd', 'realtek', 
+                                   'avg', 'avast', 'kaspersky', 'symantec', 'mcafee', 'eset',
+                                   'vmware', 'virtualbox', 'hyper-v', 'docker', 'wsl',
+                                   'usb', 'hid', 'bluetooth', 'wifi', 'network', 'audio',
+                                   'disk', 'storage', 'pci', 'acpi', 'uefi']
+                    if any(x in driver_lower for x in safe_vendors):
                         continue
                     
                     event = SecurityEvent(
@@ -1903,9 +1931,9 @@ class WindowsAgent:
             """Get list of firewall rules."""
             rules = set()
             try:
-                result = subprocess.run(
+                result = safe_subprocess_run(
                     ['netsh', 'advfirewall', 'firewall', 'show', 'rule', 'name=all'],
-                    capture_output=True, text=True, timeout=60
+                    capture_output=True, timeout=60
                 )
                 if result.returncode == 0:
                     current_rule = None
@@ -1976,9 +2004,9 @@ class WindowsAgent:
             certs = set()
             try:
                 # Query root certificates
-                result = subprocess.run([
+                result = safe_subprocess_run([
                     'certutil', '-store', 'Root'
-                ], capture_output=True, text=True, timeout=30)
+                ], capture_output=True, timeout=30)
                 
                 if result.returncode == 0:
                     for line in result.stdout.split('\n'):
@@ -1988,9 +2016,9 @@ class WindowsAgent:
                                 certs.add(f"root:{subject[:100]}")
                 
                 # Query CA certificates
-                result = subprocess.run([
+                result = safe_subprocess_run([
                     'certutil', '-store', 'CA'
-                ], capture_output=True, text=True, timeout=30)
+                ], capture_output=True, timeout=30)
                 
                 if result.returncode == 0:
                     for line in result.stdout.split('\n'):
@@ -2062,9 +2090,9 @@ class WindowsAgent:
                 pipe_path = r'\\.\pipe\\'
                 if os.path.exists(r'\\.\pipe'):
                     # Use dir command to list pipes
-                    result = subprocess.run(
+                    result = safe_subprocess_run(
                         ['cmd', '/c', 'dir', r'\\.\pipe\\'],
-                        capture_output=True, text=True, timeout=10
+                        capture_output=True, timeout=10
                     )
                     if result.returncode == 0:
                         for line in result.stdout.split('\n'):
@@ -2422,9 +2450,20 @@ class WindowsAgent:
         # Suspicious DLL patterns
         suspicious_dll_patterns = [
             r'temp.*\.dll$',
-            r'appdata.*\.dll$',
-            r'[a-f0-9]{8,}\.dll$',  # Random hex names
+            r'[a-f0-9]{32,}\.dll$',  # Random hex names (longer pattern)
             r'\\users\\.*\\downloads\\.*\.dll$',
+        ]
+        
+        # Known safe applications that load DLLs from appdata
+        safe_app_patterns = [
+            'chrome', 'firefox', 'edge', 'brave', 'opera',  # Browsers
+            'discord', 'slack', 'teams', 'zoom', 'spotify',  # Apps
+            'vscode', 'code', 'windsurf', 'cursor',  # IDEs
+            'perplexity', 'comet', 'notion', 'obsidian',  # Productivity
+            'nvidia', 'amd', 'intel', 'realtek',  # Hardware
+            'microsoft', 'windows', 'onedrive', 'outlook',  # Microsoft
+            'google', 'dropbox', 'steam', 'epic',  # Services
+            'bvssh', 'bitvise', 'putty', 'winscp',  # SSH/SFTP
         ]
         
         # Known injection techniques leave these DLLs
@@ -2474,11 +2513,15 @@ class WindowsAgent:
                                             break
                                     
                                     # Check for unsigned DLLs in unusual locations
+                                    # But skip known safe applications
                                     if not is_suspicious:
-                                        if '\\temp\\' in dll or '\\appdata\\' in dll:
-                                            if not any(x in dll for x in ['microsoft', 'windows', 'google', 'mozilla']):
+                                        proc_lower = proc_name.lower()
+                                        is_safe_app = any(safe in proc_lower or safe in dll for safe in safe_app_patterns)
+                                        
+                                        if not is_safe_app:
+                                            if '\\temp\\' in dll:
                                                 is_suspicious = True
-                                                reason = "DLL loaded from temp/appdata"
+                                                reason = "DLL loaded from temp folder"
                                     
                                     if is_suspicious:
                                         event = SecurityEvent(
@@ -2522,14 +2565,14 @@ class WindowsAgent:
         try:
             rule_name = f"SentinelAI_Block_{ip.replace('.', '_')}"
             
-            result = subprocess.run([
+            result = safe_subprocess_run([
                 'netsh', 'advfirewall', 'firewall', 'add', 'rule',
                 f'name={rule_name}',
                 'dir=in',
                 'action=block',
                 f'remoteip={ip}',
                 'enable=yes'
-            ], capture_output=True, text=True, timeout=10)
+            ], capture_output=True, timeout=10)
             
             if result.returncode == 0:
                 self.blocked_ips.add(ip)

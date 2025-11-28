@@ -513,17 +513,48 @@ function openDashboard() {
 }
 
 /**
- * Setup titlebar buttons - use Tauri commands for reliability
+ * Setup titlebar buttons - use Tauri 2.0 window API
  */
 function setupTitlebar() {
+    // Get the current window using Tauri 2.0 API
+    let appWindow = null;
+    
+    async function getAppWindow() {
+        if (appWindow) return appWindow;
+        
+        try {
+            // Tauri 2.0 - use getCurrentWindow from @tauri-apps/api/window
+            if (window.__TAURI__?.window?.getCurrentWindow) {
+                appWindow = window.__TAURI__.window.getCurrentWindow();
+                return appWindow;
+            }
+            // Alternative: window module directly
+            if (window.__TAURI__?.window?.appWindow) {
+                appWindow = window.__TAURI__.window.appWindow;
+                return appWindow;
+            }
+            // Fallback to invoke commands
+            return null;
+        } catch (e) {
+            console.error('Failed to get window:', e);
+            return null;
+        }
+    }
+    
     // Minimize button
     document.getElementById('minimize-btn')?.addEventListener('click', async () => {
         console.log('Minimize clicked');
         try {
-            await invoke('minimize_window');
+            const win = await getAppWindow();
+            if (win && win.minimize) {
+                await win.minimize();
+            } else {
+                await invoke('minimize_window');
+            }
         } catch (e) {
             console.error('Minimize failed:', e);
-            showToast('Minimize failed', 'error');
+            // Last resort fallback
+            try { await invoke('minimize_window'); } catch (e2) {}
         }
     });
     
@@ -531,9 +562,15 @@ function setupTitlebar() {
     document.getElementById('maximize-btn')?.addEventListener('click', async () => {
         console.log('Maximize clicked');
         try {
-            await invoke('toggle_maximize');
+            const win = await getAppWindow();
+            if (win && win.toggleMaximize) {
+                await win.toggleMaximize();
+            } else {
+                await invoke('toggle_maximize');
+            }
         } catch (e) {
             console.error('Maximize failed:', e);
+            try { await invoke('toggle_maximize'); } catch (e2) {}
         }
     });
     
@@ -541,7 +578,15 @@ function setupTitlebar() {
     document.getElementById('close-btn')?.addEventListener('click', async () => {
         console.log('Close clicked');
         try {
-            await invoke('close_window');
+            // First stop the agent
+            await invoke('stop_agent').catch(() => {});
+            
+            const win = await getAppWindow();
+            if (win && win.close) {
+                await win.close();
+            } else {
+                await invoke('close_window');
+            }
         } catch (e) {
             console.error('Close failed:', e);
             // Fallback - try process exit
@@ -551,6 +596,8 @@ function setupTitlebar() {
                 }
             } catch (e2) {
                 console.error('Exit also failed:', e2);
+                // Last resort - try invoke
+                try { await invoke('close_window'); } catch (e3) {}
             }
         }
     });
