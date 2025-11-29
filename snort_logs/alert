@@ -1,0 +1,39 @@
+[**] [1:1001:1] SQL Injection attempt [**]
+[Classification: Web Application Attack] [Priority: 1]
+03/10-04:28:10.352638 192.168.1.100:49213 -> 192.168.1.5:80
+
+[**] [1:1002:1] Suspicious outbound SSH connection [**]
+[Classification: Potentially Bad Traffic] [Priority: 2]
+03/10-04:28:45.123456 192.168.1.101:55123 -> 45.33.22.11:22
+
+[**] [1:1003:1] NMAP TCP Scan [**]
+[Classification: Attempted Information Leak] [Priority: 2]
+03/10-04:29:02.778901 192.168.1.102:44123 -> 192.168.1.1:443
+
+[**] [1:1004:1] Potential C&C channel detected [**]
+[Classification: Trojan Activity] [Priority: 1] 
+03/10-04:29:30.112233 192.168.1.103:39872 -> 203.0.113.5:8080
+
+[**] [1:1005:1] Malicious file download [**]
+[Classification: Malware Command and Control] [Priority: 1]
+03/10-04:30:15.445566 172.16.5.10:52413 -> 192.168.1.104:80
+
+[**] [1:1006:1] DNS request for known malicious domain [**]
+[Classification: A Network Trojan was Detected] [Priority: 1]
+03/10-04:31:02.998877 192.168.1.105:53124 -> 8.8.8.8:53
+
+[**] [1:1007:1] Unusual amount of DNS queries [**]
+[Classification: Potential Corporate Privacy Violation] [Priority: 2]
+03/10-04:31:45.662211 192.168.1.106:59999 -> 1.1.1.1:53
+
+[**] [1:1008:1] Executable code was detected [**]
+[Classification: Executable code was detected] [Priority: 1]
+03/10-04:32:25.334455 192.168.1.107:55443 -> 192.168.1.108:445
+
+[**] [1:1009:1] Multiple login failures [**]
+[Classification: An attempted administrator privilege gain] [Priority: 1]
+03/10-04:33:15.123987 45.11.22.33:44123 -> 192.168.1.109:22
+
+[**] [1:1010:1] Abnormal HTTP traffic pattern detected [**]
+[Classification: Suspicious Activity] [Priority: 2]
+03/10-04:34:02.987654 192.168.1.110:60123 -> 203.0.113.10:80
