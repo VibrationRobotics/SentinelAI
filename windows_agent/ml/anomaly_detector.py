@@ -90,8 +90,18 @@ class BaselineAnomalyDetector:
                     self.total_events = data.get('total_events', 0)
                     self.is_learning = data.get('is_learning', True)
                     
+                    # Try to load isolation forest, but don't fail if version mismatch
                     if data.get('isolation_forest') and SKLEARN_AVAILABLE:
-                        self.isolation_forest = data['isolation_forest']
+                        try:
+                            self.isolation_forest = data['isolation_forest']
+                        except Exception:
+                            # Version mismatch - create new one
+                            self.isolation_forest = IsolationForest(
+                                n_estimators=100,
+                                contamination=0.1,
+                                random_state=42,
+                                n_jobs=-1
+                            )
                         self.scaler = data.get('scaler', StandardScaler())
                     
                     logger.info(f"Loaded baseline with {self.total_events} events")

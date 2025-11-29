@@ -6,7 +6,11 @@ Combines LightGBM, XGBoost, and Random Forest for robust predictions.
 import os
 import pickle
 import logging
+import warnings
 from typing import Dict, List, Tuple, Any
+
+# Suppress sklearn feature name warnings (harmless but noisy)
+warnings.filterwarnings('ignore', message='X does not have valid feature names')
 
 logger = logging.getLogger("SentinelAgent.ML")
 
