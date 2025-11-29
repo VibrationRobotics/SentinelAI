@@ -213,16 +213,23 @@ The desktop app includes:
                                │ REST API (port 8015)
              ┌─────────────────┼─────────────────┐
              ▼                 ▼                 ▼
-┌───────────────────┐ ┌───────────────┐ ┌───────────────────┐
-│   Windows Agent   │ │  Linux Agent  │ │   macOS Agent     │
-│   (25 monitors)   │ │ (run_agent.sh)│ │  (run_agent.sh)   │
-├───────────────────┤ ├───────────────┤ ├───────────────────┤
-│ • Process Monitor │ │ • Process Mon │ │ • Process Monitor │
-│ • Network Monitor │ │ • Network Mon │ │ • Network Monitor │
-│ • Event Log Parse │ │ • Auth Log    │ │ • System Log      │
-│ • Registry Watch  │ │ • iptables    │ │ • pf firewall     │
-│ • USB/DNS/WMI/DLL │ │ • AI Analysis │ │ • AI Analysis     │
-└───────────────────┘ └───────────────┘ └───────────────────┘
+┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
+│   Windows Agent   │ │    Linux Agent    │ │   macOS Agent     │
+│   (25 monitors)   │ │   (16 monitors)   │ │  (run_agent.sh)   │
+├───────────────────┤ ├───────────────────┤ ├───────────────────┤
+│ • Process Monitor │ │ • Process Monitor │ │ • Process Monitor │
+│ • Network Monitor │ │ • Network Monitor │ │ • Network Monitor │
+│ • Event Log Parse │ │ • Auth/Sudo Log   │ │ • System Log      │
+│ • Registry Watch  │ │ • Cron Jobs       │ │ • pf firewall     │
+│ • USB/DNS/WMI/DLL │ │ • SSH Keys        │ │ • AI Analysis     │
+│ • Sysmon/ETW/AMSI │ │ • Kernel Modules  │ │                   │
+│                   │ │ • LD_PRELOAD      │ │                   │
+│                   │ │ • Setuid Binaries │ │                   │
+│                   │ │ • Systemd/Packages│ │                   │
+│                   │ │ • Container Escape│ │                   │
+│                   │ │ • SELinux/AppArmor│ │                   │
+│                   │ │ • File Integrity  │ │                   │
+└───────────────────┘ └───────────────────┘ └───────────────────┘
 ```
 
 ### Authentication Flow
@@ -353,16 +360,37 @@ docker-compose down
 
 ```bash
 # Windows
-python agent.py --dashboard URL --verbose --no-ai
+python agent.py --dashboard URL --api-key KEY --verbose --no-ai
 
 # Linux/macOS
-python3 agent.py --dashboard URL --verbose --no-ai
+python3 agent.py --dashboard URL --api-key KEY --verbose --no-ai
 
 Options:
   -d, --dashboard URL    Dashboard URL (default: http://localhost:8015)
+  -k, --api-key KEY      API key for authentication
   -v, --verbose          Enable verbose logging
   --no-ai                Disable AI analysis (heuristics only)
 ```
+
+### Linux Agent Monitors (16 total)
+
+| Category | Monitor | Description |
+|----------|---------|-------------|
+| **Core** | Process | Detects reverse shells, crypto miners, malicious tools |
+| **Core** | Network | Suspicious connections and ports |
+| **Core** | Auth Log | Failed logins, brute force detection |
+| **System** | Cron Jobs | New/modified cron entries |
+| **System** | SSH Keys | authorized_keys changes |
+| **System** | Systemd | New/modified services |
+| **System** | Packages | Unauthorized installs (dpkg/rpm/pacman) |
+| **Security** | Kernel Modules | Rootkit detection (diamorphine, reptile) |
+| **Security** | LD_PRELOAD | Library injection attacks |
+| **Security** | Setuid | New setuid/setgid binaries |
+| **Security** | File Integrity | Critical file hash monitoring |
+| **Advanced** | Container Escape | Docker socket, cgroup escapes |
+| **Advanced** | Auditd | Audit log parsing |
+| **Advanced** | SELinux | Policy violations |
+| **Advanced** | AppArmor | Policy violations |
 
 ---
 

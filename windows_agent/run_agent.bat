@@ -6,7 +6,7 @@ echo.
 
 :: API Key Configuration (optional - get from dashboard Settings > API Keys)
 :: Uncomment and set your API key for authenticated mode:
-set SENTINEL_API_KEY=sk_live_oqj1W0pNiob1TShz4wruO9hf2x8F7ca0LGh_HzGjxTQ
+::set SENTINEL_API_KEY=
 
 :: Kill any existing agent processes to prevent duplicates
 echo Stopping any existing agents...
