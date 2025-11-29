@@ -14,6 +14,7 @@ from .behavioral_analyzer import BehavioralSequenceAnalyzer, BehavioralEvent
 from .anomaly_detector import BaselineAnomalyDetector
 from .ensemble_model import EnsembleThreatModel
 from .mitre_mapping import map_to_mitre
+from .online_learning import OnlineLearningManager, get_learning_manager
 
 logger = logging.getLogger("SentinelAgent.ML")
 
@@ -42,15 +43,26 @@ class AdvancedThreatDetector:
     Combines multiple detection methods for robust threat identification.
     """
     
-    def __init__(self, model_dir: str = None, use_ai_escalation: bool = True):
+    def __init__(self, model_dir: str = None, use_ai_escalation: bool = True, 
+                 enable_online_learning: bool = True):
         self.model_dir = model_dir
         self.use_ai_escalation = use_ai_escalation
+        self.enable_online_learning = enable_online_learning
         
         # Initialize components
         self.feature_extractor = AdvancedFeatureExtractor()
         self.behavioral_analyzer = BehavioralSequenceAnalyzer()
         self.anomaly_detector = BaselineAnomalyDetector(model_dir=model_dir)
         self.ensemble_model = EnsembleThreatModel(model_dir=model_dir)
+        
+        # Online learning manager
+        self.learning_manager = None
+        if enable_online_learning:
+            try:
+                self.learning_manager = get_learning_manager(model_dir=model_dir)
+                logger.info("Online learning enabled")
+            except Exception as e:
+                logger.warning(f"Could not initialize online learning: {e}")
         
         # Statistics
         self.stats = {
@@ -157,6 +169,18 @@ class AdvancedThreatDetector:
         
         # Final threat decision: require confidence > 0.5 for threat
         final_is_threat = (is_threat and confidence > 0.5) or final_confidence > 0.6
+        
+        # Online learning: add high-confidence predictions for future training
+        if self.learning_manager and confidence >= 0.8:
+            try:
+                self.learning_manager.add_event_for_learning(
+                    event=event,
+                    features=features,
+                    prediction_is_threat=final_is_threat,
+                    prediction_confidence=confidence
+                )
+            except Exception as e:
+                logger.debug(f"Online learning error: {e}")
         
         return ThreatPrediction(
             is_threat=final_is_threat,
@@ -320,19 +344,47 @@ class AdvancedThreatDetector:
     
     def get_stats(self) -> Dict[str, Any]:
         """Get detector statistics."""
-        return {
+        stats = {
             **self.stats,
             'ensemble_stats': self.ensemble_model.get_stats(),
             'anomaly_stats': self.anomaly_detector.get_stats(),
             'behavioral_stats': self.behavioral_analyzer.get_stats(),
             'feature_count': len(self.feature_extractor.feature_names),
         }
+        
+        if self.learning_manager:
+            stats['online_learning'] = self.learning_manager.get_stats()
+        
+        return stats
     
     def save_state(self):
         """Save all model states."""
         self.ensemble_model.save_models()
         self.anomaly_detector.save_baseline()
         logger.info("Saved detector state")
+    
+    def start_autonomous_learning(self):
+        """Start background autonomous learning."""
+        if self.learning_manager:
+            self.learning_manager.start_background_learning(self)
+            logger.info("Autonomous learning started")
+    
+    def stop_autonomous_learning(self):
+        """Stop background autonomous learning."""
+        if self.learning_manager:
+            self.learning_manager.stop_background_learning()
+            logger.info("Autonomous learning stopped")
+    
+    def trigger_retrain(self) -> bool:
+        """Manually trigger model retraining with collected data."""
+        if self.learning_manager:
+            return self.learning_manager.retrain_model(self)
+        return False
+    
+    def add_user_feedback(self, event: Dict, is_threat: bool, is_false_positive: bool = False):
+        """Add user feedback to improve model."""
+        if self.learning_manager:
+            self.learning_manager.add_user_feedback(event, is_threat, is_false_positive)
 
 
 # Singleton instance

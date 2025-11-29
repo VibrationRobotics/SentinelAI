@@ -273,6 +273,14 @@ class WindowsAgent:
         # Register with dashboard
         self._register_agent()
         
+        # Start autonomous ML learning (learns from high-confidence detections)
+        if self.advanced_detector:
+            try:
+                self.advanced_detector.start_autonomous_learning()
+                logger.info("Autonomous ML learning enabled - model will improve over time")
+            except Exception as e:
+                logger.warning(f"Could not start autonomous learning: {e}")
+        
         # Main loop
         try:
             while self.running:
@@ -280,6 +288,15 @@ class WindowsAgent:
         except KeyboardInterrupt:
             logger.info("Shutting down...")
             self.running = False
+            
+            # Stop autonomous learning and save state
+            if self.advanced_detector:
+                try:
+                    self.advanced_detector.stop_autonomous_learning()
+                    self.advanced_detector.save_state()
+                    logger.info("ML state saved")
+                except Exception as e:
+                    logger.warning(f"Error saving ML state: {e}")
     
     def _heartbeat_loop(self):
         """Send periodic heartbeat to dashboard and poll for commands."""
