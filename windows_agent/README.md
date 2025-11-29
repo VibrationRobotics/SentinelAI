@@ -8,6 +8,9 @@ Native Windows agent for **real-time threat detection and autonomous protection*
 - **Network Monitoring**: Identifies reverse shells, C2 traffic, port scans, brute force
 - **Windows Event Logs**: Failed logins, privilege escalation, new services, audit log tampering
 - **Windows Firewall**: Automatically blocks malicious IPs
+- **Advanced ML v2.0**: 150+ feature extraction, ensemble models, behavioral analysis
+- **MITRE ATT&CK**: Maps detections to 45+ techniques
+- **Autonomous Learning**: Model improves over time from real-world data
 - **Reports to Dashboard**: All events appear in the Docker dashboard in real-time
 
 ## 🚀 Quick Start
@@ -78,32 +81,65 @@ Options:
   --no-ai                Disable AI analysis (use heuristics only)
 ```
 
-## 🤖 AI-Powered Analysis
+## 🤖 AI & ML-Powered Analysis
 
-The agent uses a **two-stage detection system**:
+The agent uses a **three-stage detection system**:
 
-### Stage 1: Fast Heuristics (Local)
+### Stage 1: Advanced ML v2.0 (Local - FREE)
+The primary detection engine with 150+ features:
+- **Feature Extraction**: Process, network, file, registry, behavioral, context, anomaly
+- **Ensemble Models**: LightGBM + XGBoost + Random Forest weighted voting
+- **Behavioral Analysis**: Detects attack chains (reconnaissance, lateral movement, exfiltration)
+- **Anomaly Detection**: Baseline learning with Isolation Forest
+- **MITRE ATT&CK**: Maps to 45+ techniques with confidence scores
+
+### Stage 2: Legacy Heuristics (Fallback)
 - Whitelist check (known safe apps)
 - Blacklist check (known malware names)
 - Command line pattern matching
 
-### Stage 2: AI Analysis (Dashboard)
-For uncertain processes, the agent sends data to the dashboard AI:
-- Processes running from unusual locations (Temp, Downloads)
-- PowerShell/CMD with complex arguments
-- Script hosts (wscript, cscript, mshta)
-- Executables from user directories
+### Stage 3: OpenAI GPT-4 (Dashboard - Optional)
+For uncertain cases (40-70% confidence), escalates to AI:
+- Deep threat classification
+- Remediation recommendations
+- False positive detection
 
-The AI returns:
-- **Threat classification** (malware type)
-- **Confidence score** (0-1)
-- **Recommended action** (block, monitor, allow)
+### Autonomous Learning
+The ML model **improves over time**:
+- Learns from high-confidence (>80%) predictions
+- Accepts user feedback to correct mistakes
+- Auto-retrains every 24 hours with 500+ samples
+- Persists learning between agent restarts
 
 ### Example Output
 ```
-2025-11-27 - SentinelAgent - INFO - AI-powered analysis: Enabled
-2025-11-27 - SentinelAgent - DEBUG - Requesting AI analysis for: suspicious.exe
-2025-11-27 - SentinelAgent - WARNING - SUSPICIOUS PROCESS [AI]: suspicious.exe (PID: 1234) - AI detected threat: Potential credential stealer
+2025-11-29 - SentinelAgent - INFO - Advanced ML v2.0: Enabled
+2025-11-29 - SentinelAgent - INFO - Autonomous ML learning enabled - model will improve over time
+2025-11-29 - SentinelAgent - WARNING - THREAT DETECTED [ML]: mimikatz.exe - CRITICAL (conf: 0.92)
+2025-11-29 - SentinelAgent - INFO - MITRE: T1003.001 (LSASS Memory), T1003.002 (SAM Database)
+```
+
+## 🧠 Training the ML Model
+
+The agent comes with a pre-trained model, but you can retrain:
+
+```powershell
+# Activate virtual environment
+.\venv\Scripts\activate
+
+# Train with synthetic data (5000 samples)
+python train_ml.py
+
+# Run tests
+python test_ml.py
+```
+
+### Model Files
+```
+windows_agent/ml/models/
+├── ensemble_model.pkl      # Trained ML models
+├── baseline.pkl            # Anomaly detection baseline
+└── online_training_data.pkl # Collected training samples
 ```
 
 ## What It Monitors

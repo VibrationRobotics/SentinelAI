@@ -87,6 +87,18 @@ SentinelAI is an intelligent cybersecurity system that provides **real-time thre
 | **Docker Projects** | Connect any Docker container for centralized monitoring |
 | **REST API** | Full API for custom integrations and automation |
 
+### Advanced ML v2.0 Threat Detection
+| Feature | Description |
+|---------|-------------|
+| **150+ Features** | Process, network, file, registry, behavioral, context, anomaly features |
+| **Ensemble Models** | LightGBM + XGBoost + Random Forest weighted voting |
+| **Behavioral Analysis** | Attack chain detection (recon, lateral movement, exfiltration) |
+| **Anomaly Detection** | Baseline learning with Isolation Forest |
+| **MITRE ATT&CK** | 45+ technique mappings with confidence scores |
+| **Autonomous Learning** | Model improves from high-confidence detections |
+| **User Feedback** | Correct false positives to improve accuracy |
+| **Auto-Retrain** | Background retraining every 24h with 500+ samples |
+
 ### Desktop Application (Coming Soon)
 | Feature | Description |
 |---------|-------------|
