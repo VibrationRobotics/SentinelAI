@@ -42,12 +42,20 @@ def safe_subprocess_run(cmd, **kwargs):
         kwargs['encoding'] = 'latin-1'
         return subprocess.run(cmd, **kwargs)
 
-# Import local ML detector
+# Import local ML detector (legacy)
 try:
     from ml_detector import HybridThreatDetector, get_detector
     ML_AVAILABLE = True
 except ImportError:
     ML_AVAILABLE = False
+
+# Import Advanced ML v2.0
+try:
+    from ml import AdvancedThreatDetector, get_advanced_detector, ThreatPrediction
+    from ml.training_data import generate_and_train
+    ADVANCED_ML_AVAILABLE = True
+except ImportError:
+    ADVANCED_ML_AVAILABLE = False
 
 # Configure logging
 logging.basicConfig(
@@ -176,12 +184,22 @@ class WindowsAgent:
         self.use_ai = True
         self.ai_cache: Dict[str, Dict] = {}  # Cache AI results to avoid repeated calls
         
-        # Hybrid ML/Rule-based detector (reduces OpenAI costs by 95%+)
+        # Hybrid ML/Rule-based detector (legacy - reduces OpenAI costs by 95%+)
         self.hybrid_detector = get_detector(use_ai=self.use_ai) if ML_AVAILABLE else None
+        
+        # Advanced ML v2.0 detector (150+ features, behavioral analysis, anomaly detection)
+        self.advanced_detector = None
+        if ADVANCED_ML_AVAILABLE:
+            try:
+                self.advanced_detector = get_advanced_detector(use_ai=self.use_ai)
+                logger.info("Advanced ML v2.0 detector initialized")
+            except Exception as e:
+                logger.warning(f"Could not initialize Advanced ML: {e}")
         
         logger.info(f"Windows Agent initialized - Dashboard: {self.dashboard_url}")
         logger.info(f"AI-powered analysis: {'Enabled' if self.use_ai else 'Disabled'}")
-        logger.info(f"Hybrid ML detector: {'Enabled' if self.hybrid_detector else 'Disabled (install ml_detector.py)'}")
+        logger.info(f"Advanced ML v2.0: {'Enabled' if self.advanced_detector else 'Disabled'}")
+        logger.info(f"Legacy ML detector: {'Enabled' if self.hybrid_detector else 'Disabled'}")
     
     def _get_headers(self) -> Dict[str, str]:
         """Get HTTP headers including API key if configured."""

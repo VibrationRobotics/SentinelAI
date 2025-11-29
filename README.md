@@ -38,11 +38,13 @@ SentinelAI is an intelligent cybersecurity system that provides **real-time thre
 |---------|-------------|
 | **Native Agents** | Windows, Linux, and macOS agents for real endpoint protection |
 | **AI Analysis** | GPT-4 powered threat classification and recommendations |
+| **Advanced ML v2.0** | 150+ features, ensemble models, behavioral analysis, anomaly detection |
 | **Auto-Response** | Automatically block IPs and terminate malicious processes |
 | **Autonomous Agents** | Agents receive and execute commands from dashboard |
 | **Inbound Monitoring** | Detect port scans, brute force, DDoS on your server |
 | **Real-Time Dashboard** | Beautiful web UI with live threat maps and charts |
 | **Clickable Agent Details** | Full system info (CPU, RAM, disk, network) per agent |
+| **MITRE ATT&CK Mapping** | Map detections to 50+ ATT&CK techniques |
 
 ### Monitoring Capabilities
 | Monitor | Capabilities |
