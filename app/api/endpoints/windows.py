@@ -14,7 +14,7 @@ import logging
 
 from app.services.windows_firewall import get_windows_firewall, FirewallRule
 from app.db.base import get_session
-from app.db.models import Agent, SecurityEvent, BlockedIP, AuditLog, APIKey
+from app.db.models import Agent, SecurityEvent, BlockedIP, AuditLog, APIKey, AgentCommand
 from app.api.deps import validate_api_key
 
 logger = logging.getLogger(__name__)
@@ -579,6 +579,231 @@ async def get_security_events(
         )
     except Exception as e:
         logger.error(f"Error getting events: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": str(e)}
+        )
+
+
+# ============== AGENT COMMAND QUEUE (Autonomous Response) ==============
+
+class CommandRequest(BaseModel):
+    """Request to queue a command for an agent."""
+    command_type: str  # block_ip, kill_process, quarantine_file, scan_path, unblock_ip
+    target: str  # IP address, PID, file path
+    parameters: Optional[Dict[str, Any]] = {}
+    priority: Optional[int] = 5  # 1=highest, 10=lowest
+    threat_id: Optional[str] = None
+
+
+class CommandResult(BaseModel):
+    """Result of command execution from agent."""
+    command_id: int
+    status: str  # success, failed
+    result: Optional[str] = None
+    error: Optional[str] = None
+
+
+@router.get("/agent/{hostname}/commands")
+async def get_pending_commands(
+    hostname: str,
+    db: AsyncSession = Depends(get_session),
+    api_key: Optional[APIKey] = Depends(validate_api_key)
+) -> JSONResponse:
+    """Get pending commands for an agent to execute.
+    
+    Called by agents to poll for new commands.
+    Returns commands ordered by priority (1=highest).
+    """
+    if not api_key:
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"error": "API key required"}
+        )
+    
+    try:
+        # Find agent
+        result = await db.execute(select(Agent).filter(Agent.hostname == hostname))
+        agent = result.scalar_one_or_none()
+        
+        if not agent:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content={"error": "Agent not found"}
+            )
+        
+        # Update last_seen
+        agent.last_seen = datetime.utcnow()
+        agent.status = "online"
+        
+        # Get pending commands ordered by priority
+        cmd_result = await db.execute(
+            select(AgentCommand)
+            .filter(AgentCommand.agent_id == agent.id)
+            .filter(AgentCommand.status == "pending")
+            .order_by(AgentCommand.priority, AgentCommand.created_at)
+            .limit(10)
+        )
+        commands = cmd_result.scalars().all()
+        
+        # Mark as sent
+        command_list = []
+        for cmd in commands:
+            cmd.status = "sent"
+            cmd.sent_at = datetime.utcnow()
+            command_list.append({
+                "id": cmd.id,
+                "command_type": cmd.command_type,
+                "target": cmd.target,
+                "parameters": cmd.parameters or {},
+                "priority": cmd.priority,
+                "threat_id": cmd.threat_id
+            })
+        
+        await db.commit()
+        
+        if command_list:
+            logger.info(f"Sending {len(command_list)} commands to agent {hostname}")
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"commands": command_list, "count": len(command_list)}
+        )
+    except Exception as e:
+        logger.error(f"Error getting commands: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": str(e)}
+        )
+
+
+@router.post("/agent/{hostname}/commands/result")
+async def report_command_result(
+    hostname: str,
+    result: CommandResult,
+    db: AsyncSession = Depends(get_session),
+    api_key: Optional[APIKey] = Depends(validate_api_key)
+) -> JSONResponse:
+    """Report the result of a command execution.
+    
+    Called by agents after executing a command.
+    """
+    if not api_key:
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"error": "API key required"}
+        )
+    
+    try:
+        # Find command
+        cmd_result = await db.execute(
+            select(AgentCommand).filter(AgentCommand.id == result.command_id)
+        )
+        command = cmd_result.scalar_one_or_none()
+        
+        if not command:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content={"error": "Command not found"}
+            )
+        
+        # Update command status
+        command.status = "executed" if result.status == "success" else "failed"
+        command.executed_at = datetime.utcnow()
+        command.result = result.result or result.error
+        
+        # Log to audit
+        audit_log = AuditLog(
+            source="agent",
+            action=f"command_{result.status}",
+            severity="INFO" if result.status == "success" else "WARNING",
+            description=f"Command {command.command_type} on {command.target}: {result.status}",
+            hostname=hostname,
+            details={
+                "command_id": command.id,
+                "command_type": command.command_type,
+                "target": command.target,
+                "result": result.result,
+                "error": result.error
+            }
+        )
+        db.add(audit_log)
+        
+        await db.commit()
+        
+        logger.info(f"Command {command.id} result from {hostname}: {result.status}")
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"success": True}
+        )
+    except Exception as e:
+        logger.error(f"Error reporting command result: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": str(e)}
+        )
+
+
+@router.post("/agent/{hostname}/commands/queue")
+async def queue_command(
+    hostname: str,
+    command: CommandRequest,
+    db: AsyncSession = Depends(get_session),
+    api_key: Optional[APIKey] = Depends(validate_api_key)
+) -> JSONResponse:
+    """Queue a command for an agent to execute.
+    
+    Can be called by dashboard or auto-response service.
+    """
+    try:
+        # Find agent
+        result = await db.execute(select(Agent).filter(Agent.hostname == hostname))
+        agent = result.scalar_one_or_none()
+        
+        if not agent:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content={"error": "Agent not found"}
+            )
+        
+        # Create command
+        new_command = AgentCommand(
+            agent_id=agent.id,
+            command_type=command.command_type,
+            target=command.target,
+            parameters=command.parameters or {},
+            priority=command.priority or 5,
+            threat_id=command.threat_id
+        )
+        db.add(new_command)
+        
+        # Log to audit
+        audit_log = AuditLog(
+            source="dashboard" if api_key else "auto",
+            action="command_queued",
+            severity="INFO",
+            description=f"Queued {command.command_type} command for {hostname}: {command.target}",
+            hostname=hostname,
+            details={
+                "command_type": command.command_type,
+                "target": command.target,
+                "parameters": command.parameters
+            }
+        )
+        db.add(audit_log)
+        
+        await db.commit()
+        await db.refresh(new_command)
+        
+        logger.info(f"Queued command {new_command.id} for agent {hostname}: {command.command_type} -> {command.target}")
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"success": True, "command_id": new_command.id}
+        )
+    except Exception as e:
+        logger.error(f"Error queuing command: {e}")
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"error": str(e)}

@@ -215,3 +215,24 @@ class UserSettings(Base):
     email_alerts: Mapped[bool] = mapped_column(Boolean, default=False)
     
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AgentCommand(Base):
+    """Commands queued for agents to execute (autonomous response)"""
+    __tablename__ = "agent_commands"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    agent_id: Mapped[int] = mapped_column(Integer, ForeignKey("agents.id"), index=True)
+    command_type: Mapped[str] = mapped_column(String, index=True)  # block_ip, kill_process, quarantine_file, scan_path
+    target: Mapped[str] = mapped_column(String)  # IP address, PID, file path, etc.
+    parameters: Mapped[dict] = mapped_column(JSON, default=dict)  # Additional parameters
+    priority: Mapped[int] = mapped_column(Integer, default=5)  # 1=highest, 10=lowest
+    status: Mapped[str] = mapped_column(String, default="pending")  # pending, sent, executed, failed
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    executed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    result: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # success, failed, error message
+    threat_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("threat_events.id"), nullable=True)
+    
+    # Relationships
+    agent: Mapped["Agent"] = relationship("Agent")

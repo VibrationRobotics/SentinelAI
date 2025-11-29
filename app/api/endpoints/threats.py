@@ -16,8 +16,9 @@ from app.services.openai_service import get_openai_service
 from app.services.geolocation_service import enrich_threat_with_location
 from app.services.remediation_service import get_remediation_service
 from app.services.auto_response_service import get_auto_response_service
-from app.db.models import User, ThreatEvent
+from app.db.models import User, ThreatEvent, Agent, AgentCommand
 from app.api.deps import get_current_user, get_db
+from app.db.base import get_session
 from app.services.audit_service import AuditService, log_threat_detected, log_ai_analysis, log_user_action
 
 logger = logging.getLogger(__name__)
@@ -171,11 +172,46 @@ async def analyze_threat(
         auto_response_result = None
         try:
             auto_response_service = get_auto_response_service()
+            
+            # Add hostname and process info for agent command queuing
+            analyzed_threat["hostname"] = threat_data.payload.get("hostname") if threat_data.payload else None
+            analyzed_threat["process_info"] = threat_data.payload.get("process_info", {}) if threat_data.payload else {}
+            analyzed_threat["file_path"] = threat_data.payload.get("file_path") if threat_data.payload else None
+            
             auto_response_result = await auto_response_service.evaluate_threat(analyzed_threat)
             
             if auto_response_result.get("action_taken"):
                 analyzed_threat["auto_response"] = auto_response_result
                 logger.info(f"Auto-response triggered for threat {threat_id}: {auto_response_result.get('action_taken')}")
+                
+                # Queue commands for agents
+                commands_queued = auto_response_result.get("commands_queued", [])
+                if commands_queued:
+                    try:
+                        async for session in get_session():
+                            for cmd in commands_queued:
+                                # Find agent
+                                result = await session.execute(
+                                    select(Agent).filter(Agent.hostname == cmd["hostname"])
+                                )
+                                agent = result.scalar_one_or_none()
+                                
+                                if agent:
+                                    new_command = AgentCommand(
+                                        agent_id=agent.id,
+                                        command_type=cmd["command_type"],
+                                        target=cmd["target"],
+                                        parameters={},
+                                        priority=1,  # High priority for auto-response
+                                        threat_id=cmd.get("threat_id")
+                                    )
+                                    session.add(new_command)
+                                    logger.info(f"Queued {cmd['command_type']} command for agent {cmd['hostname']}")
+                            
+                            await session.commit()
+                            break
+                    except Exception as cmd_error:
+                        logger.error(f"Failed to queue agent commands: {cmd_error}")
         except Exception as ar_error:
             logger.error(f"Auto-response evaluation error: {ar_error}")
         

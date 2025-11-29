@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 class ResponseAction(Enum):
     """Available auto-response actions."""
     BLOCK_IP = "block_ip"
+    KILL_PROCESS = "kill_process"
+    QUARANTINE_FILE = "quarantine_file"
     UPDATE_FIREWALL = "update_firewall"
     ALERT_ONLY = "alert_only"
     LOG_ONLY = "log_only"
@@ -202,36 +204,82 @@ class AutoResponseService:
             logger.warning("Auto-response rate limit exceeded")
             return response
         
-        # Determine action based on config
-        if self.config.auto_block_ips:
-            action = ResponseAction.BLOCK_IP
-        elif self.config.auto_update_firewall:
-            action = ResponseAction.UPDATE_FIREWALL
-        else:
-            action = ResponseAction.ALERT_ONLY
+        # Determine action based on threat type and config
+        threat_type = threat.get("threat_type", "")
+        hostname = threat.get("hostname")  # Agent hostname if from agent
+        process_info = threat.get("process_info", {})
+        file_path = threat.get("file_path")
         
-        # Execute action
-        logger.info(f"Auto-response triggered for {source_ip} (severity: {severity})")
+        actions_to_take = []
         
-        if self.config.dry_run:
-            result = {
-                "success": True,
-                "dry_run": True,
-                "message": f"Would execute {action.value} for {source_ip}"
-            }
-        else:
-            if action == ResponseAction.BLOCK_IP:
-                result = self.remediation_service.block_ip(source_ip, threat_id)
-            elif action == ResponseAction.UPDATE_FIREWALL:
-                result = self.remediation_service.update_firewall(source_ip, "", threat_id)
+        if self.config.auto_block_ips and source_ip and source_ip not in ["127.0.0.1", "localhost"]:
+            actions_to_take.append((ResponseAction.BLOCK_IP, source_ip))
+        
+        # If it's a process threat, queue kill command
+        if process_info.get("pid") and threat_type in ["suspicious_process", "malware", "reverse_shell", "crypto_miner"]:
+            actions_to_take.append((ResponseAction.KILL_PROCESS, str(process_info.get("pid"))))
+        
+        # If it's a file threat, queue quarantine command
+        if file_path and threat_type in ["malware", "suspicious_file", "ransomware"]:
+            actions_to_take.append((ResponseAction.QUARANTINE_FILE, file_path))
+        
+        if not actions_to_take:
+            actions_to_take.append((ResponseAction.ALERT_ONLY, ""))
+        
+        # Execute actions
+        logger.info(f"Auto-response triggered for threat {threat_id} (severity: {severity})")
+        
+        results = []
+        commands_queued = []
+        
+        for action, target in actions_to_take:
+            if self.config.dry_run:
+                result = {
+                    "success": True,
+                    "dry_run": True,
+                    "message": f"Would execute {action.value} on {target}"
+                }
             else:
-                result = {"success": True, "action": "alert_only"}
+                if action == ResponseAction.BLOCK_IP:
+                    # Block on server side
+                    result = self.remediation_service.block_ip(target, threat_id)
+                    # Also queue command for agent if we know the hostname
+                    if hostname:
+                        commands_queued.append({
+                            "hostname": hostname,
+                            "command_type": "block_ip",
+                            "target": target,
+                            "threat_id": threat_id
+                        })
+                elif action == ResponseAction.KILL_PROCESS:
+                    result = {"success": True, "action": "kill_process", "target": target}
+                    if hostname:
+                        commands_queued.append({
+                            "hostname": hostname,
+                            "command_type": "kill_process",
+                            "target": target,
+                            "threat_id": threat_id
+                        })
+                elif action == ResponseAction.QUARANTINE_FILE:
+                    result = {"success": True, "action": "quarantine_file", "target": target}
+                    if hostname:
+                        commands_queued.append({
+                            "hostname": hostname,
+                            "command_type": "quarantine_file",
+                            "target": target,
+                            "threat_id": threat_id
+                        })
+                elif action == ResponseAction.UPDATE_FIREWALL:
+                    result = self.remediation_service.update_firewall(target, "", threat_id)
+                else:
+                    result = {"success": True, "action": "alert_only"}
+            
+            results.append({"action": action.value, "target": target, "result": result})
+            self._record_action(target or source_ip, action.value, result)
         
-        # Record the action
-        self._record_action(source_ip, action.value, result)
-        
-        response["action_taken"] = action.value
-        response["result"] = result
+        response["action_taken"] = [r["action"] for r in results]
+        response["result"] = results
+        response["commands_queued"] = commands_queued
         response["reason"] = f"Severity {severity} >= threshold {self.config.severity_threshold}"
         
         return response

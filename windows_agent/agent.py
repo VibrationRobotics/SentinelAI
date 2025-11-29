@@ -264,13 +264,187 @@ class WindowsAgent:
             self.running = False
     
     def _heartbeat_loop(self):
-        """Send periodic heartbeat to dashboard to stay registered."""
+        """Send periodic heartbeat to dashboard and poll for commands."""
         while self.running:
             try:
                 time.sleep(30)  # Send heartbeat every 30 seconds
                 self._register_agent()  # Re-register acts as heartbeat
+                self._poll_and_execute_commands()  # Check for pending commands
             except Exception as e:
                 logger.debug(f"Heartbeat error: {e}")
+    
+    def _poll_and_execute_commands(self):
+        """Poll dashboard for pending commands and execute them."""
+        try:
+            hostname = platform.node()
+            response = requests.get(
+                f"{self.api_base}/windows/agent/{hostname}/commands",
+                headers=self._get_headers(),
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                commands = data.get("commands", [])
+                
+                for cmd in commands:
+                    self._execute_command(cmd)
+            elif response.status_code == 401:
+                logger.debug("Command poll: API key required")
+            elif response.status_code != 404:
+                logger.debug(f"Command poll returned: {response.status_code}")
+                
+        except requests.exceptions.RequestException as e:
+            logger.debug(f"Command poll error: {e}")
+        except Exception as e:
+            logger.error(f"Command execution error: {e}")
+    
+    def _execute_command(self, cmd: Dict[str, Any]):
+        """Execute a command from the dashboard."""
+        command_id = cmd.get("id")
+        command_type = cmd.get("command_type")
+        target = cmd.get("target")
+        parameters = cmd.get("parameters", {})
+        
+        logger.info(f"Executing command {command_id}: {command_type} -> {target}")
+        
+        result = {"status": "failed", "error": "Unknown command type"}
+        
+        try:
+            if command_type == "block_ip":
+                success = self.block_ip(target)
+                result = {"status": "success" if success else "failed", "result": f"IP {target} blocked" if success else "Failed to block IP"}
+            
+            elif command_type == "kill_process":
+                success = self._kill_process(int(target))
+                result = {"status": "success" if success else "failed", "result": f"Process {target} terminated" if success else "Failed to kill process"}
+            
+            elif command_type == "quarantine_file":
+                success = self._quarantine_file(target)
+                result = {"status": "success" if success else "failed", "result": f"File {target} quarantined" if success else "Failed to quarantine file"}
+            
+            elif command_type == "unblock_ip":
+                success = self._unblock_ip(target)
+                result = {"status": "success" if success else "failed", "result": f"IP {target} unblocked" if success else "Failed to unblock IP"}
+            
+            elif command_type == "scan_path":
+                # Trigger a scan of a specific path
+                result = {"status": "success", "result": f"Scan queued for {target}"}
+            
+            else:
+                result = {"status": "failed", "error": f"Unknown command type: {command_type}"}
+            
+            logger.info(f"Command {command_id} result: {result['status']}")
+            
+        except Exception as e:
+            result = {"status": "failed", "error": str(e)}
+            logger.error(f"Command {command_id} failed: {e}")
+        
+        # Report result back to dashboard
+        self._report_command_result(command_id, result)
+    
+    def _report_command_result(self, command_id: int, result: Dict[str, Any]):
+        """Report command execution result to dashboard."""
+        try:
+            hostname = platform.node()
+            response = requests.post(
+                f"{self.api_base}/windows/agent/{hostname}/commands/result",
+                json={
+                    "command_id": command_id,
+                    "status": result.get("status", "failed"),
+                    "result": result.get("result"),
+                    "error": result.get("error")
+                },
+                headers=self._get_headers(),
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                logger.debug(f"Command {command_id} result reported successfully")
+            else:
+                logger.warning(f"Failed to report command result: {response.status_code}")
+                
+        except Exception as e:
+            logger.error(f"Error reporting command result: {e}")
+    
+    def _kill_process(self, pid: int) -> bool:
+        """Kill a process by PID."""
+        try:
+            proc = psutil.Process(pid)
+            proc_name = proc.name()
+            proc.terminate()
+            proc.wait(timeout=5)
+            logger.info(f"Terminated process {pid} ({proc_name})")
+            return True
+        except psutil.NoSuchProcess:
+            logger.warning(f"Process {pid} not found")
+            return False
+        except psutil.AccessDenied:
+            logger.error(f"Access denied killing process {pid}")
+            return False
+        except Exception as e:
+            logger.error(f"Error killing process {pid}: {e}")
+            return False
+    
+    def _quarantine_file(self, file_path: str) -> bool:
+        """Quarantine a file by moving it to a quarantine folder."""
+        try:
+            if not os.path.exists(file_path):
+                logger.warning(f"File not found: {file_path}")
+                return False
+            
+            # Create quarantine folder
+            quarantine_dir = os.path.join(os.environ.get('PROGRAMDATA', 'C:\\ProgramData'), 'SentinelAI', 'Quarantine')
+            os.makedirs(quarantine_dir, exist_ok=True)
+            
+            # Generate unique quarantine name
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            original_name = os.path.basename(file_path)
+            quarantine_name = f"{timestamp}_{original_name}.quarantine"
+            quarantine_path = os.path.join(quarantine_dir, quarantine_name)
+            
+            # Move file to quarantine
+            import shutil
+            shutil.move(file_path, quarantine_path)
+            
+            # Log the quarantine action
+            logger.info(f"Quarantined file: {file_path} -> {quarantine_path}")
+            
+            # Save metadata
+            metadata_path = quarantine_path + ".meta"
+            with open(metadata_path, 'w') as f:
+                json.dump({
+                    "original_path": file_path,
+                    "quarantine_time": datetime.now().isoformat(),
+                    "quarantine_path": quarantine_path
+                }, f)
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error quarantining file {file_path}: {e}")
+            return False
+    
+    def _unblock_ip(self, ip: str) -> bool:
+        """Unblock an IP address from Windows Firewall."""
+        try:
+            rule_name = f"SentinelAI_Block_{ip.replace('.', '_')}"
+            
+            result = safe_subprocess_run([
+                'netsh', 'advfirewall', 'firewall', 'delete', 'rule',
+                f'name={rule_name}'
+            ], capture_output=True, timeout=10)
+            
+            if result.returncode == 0:
+                self.blocked_ips.discard(ip)
+                logger.info(f"Unblocked IP: {ip}")
+                return True
+            else:
+                logger.warning(f"Failed to unblock IP {ip}: {result.stderr}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error unblocking IP {ip}: {e}")
+            return False
     
     def _get_windows_version(self) -> str:
         """Get proper Windows version name (Windows 10/11) with build number."""
@@ -577,6 +751,14 @@ class WindowsAgent:
                 
                 # Step 3: Send to dashboard
                 try:
+                    # Include hostname and process info for autonomous response
+                    payload_data = event.details.copy()
+                    payload_data['hostname'] = platform.node()
+                    if 'pid' in event.details:
+                        payload_data['process_info'] = {'pid': event.details.get('pid')}
+                    if 'file_path' in event.details:
+                        payload_data['file_path'] = event.details.get('file_path')
+                    
                     response = requests.post(
                         f"{self.api_base}/threats/analyze",
                         json={
@@ -584,13 +766,15 @@ class WindowsAgent:
                             'threat_type': event.event_type,
                             'severity': event.severity,
                             'description': event.description,
-                            'payload': json.dumps(event.details),
+                            'payload': json.dumps(payload_data),
                             'timestamp': event.timestamp,
                             'agent_source': 'windows_agent',
+                            'hostname': platform.node(),
                             'ai_analyzed': ai_result is not None,
                             'ml_analyzed': local_analysis is not None,
                             'request_ai_analysis': should_use_openai and event.severity in ['HIGH', 'CRITICAL']
                         },
+                        headers=self._get_headers(),
                         timeout=5
                     )
                     

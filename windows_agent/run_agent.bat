@@ -6,7 +6,7 @@ echo.
 
 :: API Key Configuration (optional - get from dashboard Settings > API Keys)
 :: Uncomment and set your API key for authenticated mode:
-::set SENTINEL_API_KEY=
+set SENTINEL_API_KEY=sk_live_YyOgBAAqHA0mSrsNS-wPcw0iQt47TPHqarCvsjRBxXs
 
 :: Kill any existing agent processes to prevent duplicates
 echo Stopping any existing agents...
@@ -32,5 +32,5 @@ if defined SENTINEL_API_KEY (
 )
 echo Starting agent... Press Ctrl+C to stop
 echo.
-python agent.py --dashboard http://localhost:8015
+python agent.py --dashboard http://148.170.66.162:8015
 pause
