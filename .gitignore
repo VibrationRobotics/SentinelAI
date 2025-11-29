@@ -73,6 +73,8 @@ settings.json
 
 # Private planning documents
 PLAN.md
+article.txt
+discord.md
 
 # Ignore default SQLite database files
 snort_threats.db
