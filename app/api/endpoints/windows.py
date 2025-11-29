@@ -910,3 +910,141 @@ async def queue_command(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"error": str(e)}
         )
+
+
+# ============== ATTACKER INTELLIGENCE ==============
+
+# In-memory store for attacker intel (could be moved to DB later)
+attacker_intel_store: Dict[str, Dict[str, Any]] = {}
+
+@router.post("/agent/intel")
+async def receive_attacker_intel(
+    intel_data: Dict[str, Any],
+    db: AsyncSession = Depends(get_session)
+) -> JSONResponse:
+    """
+    Receive attacker intelligence gathered by agents.
+    This is LEGAL OSINT data - no active scanning of attackers.
+    """
+    try:
+        hostname = intel_data.get("hostname", "unknown")
+        attacker_ip = intel_data.get("attacker_ip")
+        reason = intel_data.get("reason", "Unknown")
+        blocked = intel_data.get("blocked", False)
+        intel = intel_data.get("intel", {})
+        
+        if not attacker_ip:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"error": "Missing attacker_ip"}
+            )
+        
+        # Store intel
+        attacker_intel_store[attacker_ip] = {
+            "ip": attacker_ip,
+            "first_seen": intel.get("gathered_at", datetime.utcnow().isoformat()),
+            "last_seen": datetime.utcnow().isoformat(),
+            "blocked": blocked,
+            "blocked_by": [hostname] if blocked else [],
+            "reasons": [reason],
+            "intel": intel,
+            "threat_score": intel.get("threat_score", 0),
+            "is_known_bad": intel.get("is_known_bad", False),
+            "geolocation": intel.get("geolocation", {}),
+            "reputation": intel.get("reputation", {})
+        }
+        
+        # Also store as a security event for the agent
+        result = await db.execute(select(Agent).filter(Agent.hostname == hostname))
+        agent = result.scalar_one_or_none()
+        
+        if agent:
+            # Create intel event
+            geo = intel.get("geolocation", {})
+            location = f"{geo.get('city', 'Unknown')}, {geo.get('country', 'Unknown')}" if geo else "Unknown"
+            
+            security_event = SecurityEvent(
+                agent_id=agent.id,
+                event_type="attacker_intel",
+                severity="HIGH" if intel.get("is_known_bad") else "MEDIUM",
+                description=f"Intelligence gathered on attacker {attacker_ip} from {location}",
+                details={
+                    "attacker_ip": attacker_ip,
+                    "reason": reason,
+                    "blocked": blocked,
+                    "threat_score": intel.get("threat_score", 0),
+                    "is_known_bad": intel.get("is_known_bad", False),
+                    "geolocation": intel.get("geolocation"),
+                    "reputation": intel.get("reputation"),
+                    "reverse_dns": intel.get("reverse_dns"),
+                    "sources_checked": intel.get("sources_checked", [])
+                },
+                source_ip=attacker_ip,
+                is_threat=intel.get("is_known_bad", False)
+            )
+            db.add(security_event)
+            await db.commit()
+        
+        logger.info(f"Received intel on attacker {attacker_ip} from {hostname}: score={intel.get('threat_score', 0)}")
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={"success": True, "stored": True}
+        )
+    except Exception as e:
+        logger.error(f"Error storing attacker intel: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": str(e)}
+        )
+
+
+@router.get("/attackers")
+async def get_attacker_intel(
+    limit: int = Query(50, ge=1, le=500)
+) -> JSONResponse:
+    """Get all gathered attacker intelligence."""
+    try:
+        # Sort by threat score descending
+        sorted_attackers = sorted(
+            attacker_intel_store.values(),
+            key=lambda x: x.get("threat_score", 0),
+            reverse=True
+        )[:limit]
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "attackers": sorted_attackers,
+                "count": len(sorted_attackers),
+                "total": len(attacker_intel_store)
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error getting attacker intel: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": str(e)}
+        )
+
+
+@router.get("/attacker/{ip}")
+async def get_attacker_details(ip: str) -> JSONResponse:
+    """Get detailed intelligence on a specific attacker IP."""
+    try:
+        if ip not in attacker_intel_store:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content={"error": f"No intel found for IP {ip}"}
+            )
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=attacker_intel_store[ip]
+        )
+    except Exception as e:
+        logger.error(f"Error getting attacker details: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": str(e)}
+        )

@@ -71,12 +71,14 @@ SentinelAI is an intelligent cybersecurity system that provides **real-time thre
 | **Inbound Monitor** | Detects incoming attacks, port scans, connection floods |
 | **Brute Force Detection** | Tracks failed logins, auto-blocks attackers |
 | **Auto-Block** | Automatically blocks malicious IPs via firewall |
+| **Attacker Intelligence** | OSINT lookup on attackers (geolocation, reputation, ISP) |
 
 ### Integrations
 | Integration | Description |
 |-------------|-------------|
 | **OpenAI GPT-4** | Intelligent threat analysis and remediation suggestions |
 | **VirusTotal** | Hash, URL, IP, and domain reputation lookups |
+| **AbuseIPDB** | IP reputation checking for attackers (optional) |
 | **AVG Antivirus** | Parse AVG/Avast logs for threat detections |
 | **Windows Defender** | Integration with Windows Security Center |
 | **Snort IDS** | Ingest alerts from Snort intrusion detection system |

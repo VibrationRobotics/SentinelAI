@@ -1566,6 +1566,9 @@ class WindowsAgent:
                     ip_address=ip
                 )
                 self._send_event(event)
+                
+                # Gather intelligence about the attacker (async, non-blocking)
+                self._handle_attacker_detected(ip, reason)
             else:
                 logger.error(f"Failed to auto-block {ip}")
                 
@@ -3497,6 +3500,163 @@ class WindowsAgent:
             'blocked_ips': list(self.blocked_ips),
             'suspicious_ips': list(self.suspicious_ips)
         }
+    
+    def gather_attacker_intel(self, ip: str) -> Dict[str, Any]:
+        """
+        Gather OSINT intelligence about an attacker IP (LEGAL - no active scanning).
+        Uses public APIs and databases to get reputation info.
+        """
+        intel = {
+            "ip": ip,
+            "gathered_at": datetime.now().isoformat(),
+            "reputation": {},
+            "geolocation": {},
+            "reverse_dns": None,
+            "is_known_bad": False,
+            "threat_score": 0,
+            "sources_checked": []
+        }
+        
+        try:
+            # 1. Reverse DNS lookup (legal)
+            try:
+                import socket
+                intel["reverse_dns"] = socket.gethostbyaddr(ip)[0]
+            except:
+                intel["reverse_dns"] = None
+            
+            # 2. Check ip-api.com for geolocation (free, no key needed)
+            try:
+                resp = requests.get(f"http://ip-api.com/json/{ip}?fields=status,country,regionName,city,isp,org,as,proxy,hosting", timeout=5)
+                if resp.status_code == 200:
+                    geo = resp.json()
+                    if geo.get("status") == "success":
+                        intel["geolocation"] = {
+                            "country": geo.get("country"),
+                            "region": geo.get("regionName"),
+                            "city": geo.get("city"),
+                            "isp": geo.get("isp"),
+                            "org": geo.get("org"),
+                            "asn": geo.get("as"),
+                            "is_proxy": geo.get("proxy", False),
+                            "is_hosting": geo.get("hosting", False)
+                        }
+                        intel["sources_checked"].append("ip-api.com")
+                        # Hosting/proxy IPs are more suspicious
+                        if geo.get("proxy") or geo.get("hosting"):
+                            intel["threat_score"] += 20
+            except:
+                pass
+            
+            # 3. Check AbuseIPDB if API key is configured
+            abuseipdb_key = os.environ.get("ABUSEIPDB_API_KEY")
+            if abuseipdb_key:
+                try:
+                    headers = {"Key": abuseipdb_key, "Accept": "application/json"}
+                    resp = requests.get(
+                        f"https://api.abuseipdb.com/api/v2/check?ipAddress={ip}&maxAgeInDays=90",
+                        headers=headers, timeout=5
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json().get("data", {})
+                        intel["reputation"]["abuseipdb"] = {
+                            "abuse_confidence": data.get("abuseConfidenceScore", 0),
+                            "total_reports": data.get("totalReports", 0),
+                            "is_whitelisted": data.get("isWhitelisted", False),
+                            "last_reported": data.get("lastReportedAt"),
+                            "usage_type": data.get("usageType"),
+                            "domain": data.get("domain")
+                        }
+                        intel["sources_checked"].append("AbuseIPDB")
+                        # High abuse score = known bad
+                        abuse_score = data.get("abuseConfidenceScore", 0)
+                        if abuse_score >= 50:
+                            intel["is_known_bad"] = True
+                            intel["threat_score"] += abuse_score
+                except:
+                    pass
+            
+            # 4. Check VirusTotal if API key is configured
+            vt_key = os.environ.get("VIRUSTOTAL_API_KEY")
+            if vt_key:
+                try:
+                    headers = {"x-apikey": vt_key}
+                    resp = requests.get(
+                        f"https://www.virustotal.com/api/v3/ip_addresses/{ip}",
+                        headers=headers, timeout=5
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json().get("data", {}).get("attributes", {})
+                        stats = data.get("last_analysis_stats", {})
+                        intel["reputation"]["virustotal"] = {
+                            "malicious": stats.get("malicious", 0),
+                            "suspicious": stats.get("suspicious", 0),
+                            "harmless": stats.get("harmless", 0),
+                            "as_owner": data.get("as_owner"),
+                            "country": data.get("country")
+                        }
+                        intel["sources_checked"].append("VirusTotal")
+                        if stats.get("malicious", 0) > 0:
+                            intel["is_known_bad"] = True
+                            intel["threat_score"] += stats.get("malicious", 0) * 10
+                except:
+                    pass
+            
+            # 5. Basic threat classification
+            if intel["threat_score"] >= 50:
+                intel["classification"] = "HIGH_RISK"
+            elif intel["threat_score"] >= 20:
+                intel["classification"] = "SUSPICIOUS"
+            else:
+                intel["classification"] = "UNKNOWN"
+            
+            logger.info(f"Intel gathered for {ip}: score={intel['threat_score']}, known_bad={intel['is_known_bad']}")
+            
+        except Exception as e:
+            logger.error(f"Error gathering intel for {ip}: {e}")
+            intel["error"] = str(e)
+        
+        return intel
+    
+    def _handle_attacker_detected(self, ip: str, reason: str):
+        """Enhanced attacker handling with intelligence gathering."""
+        # Block the IP first (immediate response)
+        blocked = self.block_ip(ip)
+        
+        # Gather intelligence in background (non-blocking)
+        def gather_intel_async():
+            intel = self.gather_attacker_intel(ip)
+            
+            # Send intel to dashboard
+            try:
+                requests.post(
+                    f"{self.api_base}/api/v1/windows/agent/intel",
+                    json={
+                        "hostname": platform.node(),
+                        "attacker_ip": ip,
+                        "reason": reason,
+                        "blocked": blocked,
+                        "intel": intel
+                    },
+                    headers=self._get_headers(),
+                    timeout=5
+                )
+            except:
+                pass
+            
+            # Log detailed intel
+            if intel.get("is_known_bad"):
+                logger.warning(f"⚠️ KNOWN MALICIOUS IP: {ip} - Score: {intel['threat_score']}")
+                if intel.get("geolocation"):
+                    geo = intel["geolocation"]
+                    logger.warning(f"   Location: {geo.get('city', 'Unknown')}, {geo.get('country', 'Unknown')}")
+                    logger.warning(f"   ISP: {geo.get('isp', 'Unknown')} ({geo.get('org', '')})")
+                if intel.get("reputation", {}).get("abuseipdb"):
+                    abuse = intel["reputation"]["abuseipdb"]
+                    logger.warning(f"   AbuseIPDB: {abuse.get('abuse_confidence', 0)}% confidence, {abuse.get('total_reports', 0)} reports")
+        
+        # Run intel gathering in background thread
+        threading.Thread(target=gather_intel_async, daemon=True).start()
 
 
 def main():
