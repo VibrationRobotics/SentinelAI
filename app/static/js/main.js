@@ -1054,10 +1054,11 @@ function resolveThreat(threatId) {
     showNotification('Processing request...', 'info');
     
     // Call the API to resolve the threat
-    fetch(`/api/v1/threats/resolve/${threatId}`, {
+    fetch(`/api/v1/threats/${threatId}/resolve`, {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${window.authManager?.token}`
         }
     })
     .then(response => {
@@ -1102,10 +1103,11 @@ function blockThreat(threatId) {
     showNotification('Processing block request...', 'info');
     
     // Call the API to block the threat source
-    fetch(`/api/v1/threats/block/${threatId}`, {
+    fetch(`/api/v1/threats/${threatId}/block`, {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${window.authManager?.token}`
         }
     })
     .then(response => {
@@ -1253,7 +1255,10 @@ function addToWhitelist(threatId, sourceIp) {
     
     fetch('/api/v1/ai/whitelist/event', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${window.authManager?.token}`
+        },
         body: JSON.stringify({
             event_type: threat?.type || 'unknown',
             event_id: threatId,
@@ -1269,7 +1274,10 @@ function addToWhitelist(threatId, sourceIp) {
         // Also add IP to auto-response whitelist
         fetch('/api/v1/auto-response/whitelist', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${window.authManager?.token}`
+            },
             body: JSON.stringify({ ip: sourceIp, action: 'add' })
         });
         

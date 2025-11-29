@@ -12,6 +12,7 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String, nullable=False)
     full_name: Mapped[str] = mapped_column(String, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    role: Mapped[str] = mapped_column(String, default="user", nullable=False)  # admin, user, viewer
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     last_login: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
@@ -125,3 +126,92 @@ class AuditLog(Base):
     agent_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("agents.id"), nullable=True)
     ip_address: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     hostname: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+
+class APIKey(Base):
+    """API keys for agent authentication"""
+    __tablename__ = "api_keys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    key_hash: Mapped[str] = mapped_column(String, unique=True, index=True)  # SHA256 hash of the key
+    name: Mapped[str] = mapped_column(String)  # Friendly name
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_used: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    permissions: Mapped[dict] = mapped_column(JSON, default=dict)  # {"agents": ["read", "write"], ...}
+    rate_limit: Mapped[int] = mapped_column(Integer, default=1000)  # Requests per hour
+
+
+class AgentLicense(Base):
+    """Per-agent licensing"""
+    __tablename__ = "agent_licenses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    license_key: Mapped[str] = mapped_column(String, unique=True, index=True)
+    agent_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("agents.id"), nullable=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"))
+    tier: Mapped[str] = mapped_column(String, default="free")  # free, pro, enterprise
+    max_agents: Mapped[int] = mapped_column(Integer, default=1)  # Max agents allowed
+    max_events_per_day: Mapped[int] = mapped_column(Integer, default=1000)
+    ai_analysis_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class UsageMetric(Base):
+    """Usage analytics for agents and API"""
+    __tablename__ = "usage_metrics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    metric_type: Mapped[str] = mapped_column(String, index=True)  # api_call, event_received, ai_analysis, etc.
+    agent_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("agents.id"), nullable=True)
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    count: Mapped[int] = mapped_column(Integer, default=1)
+    details: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+
+class SystemHealth(Base):
+    """System health monitoring for autonomous operations"""
+    __tablename__ = "system_health"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    component: Mapped[str] = mapped_column(String, index=True)  # web, db, redis, agent
+    status: Mapped[str] = mapped_column(String)  # healthy, unhealthy, degraded
+    response_time_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    auto_action_taken: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # restart, alert, etc.
+
+
+class UserSettings(Base):
+    """User-specific settings"""
+    __tablename__ = "user_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), unique=True)
+    
+    # Auto-response settings
+    auto_response_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    severity_threshold: Mapped[str] = mapped_column(String, default="HIGH")  # HIGH, MEDIUM, LOW
+    cooldown_seconds: Mapped[int] = mapped_column(Integer, default=300)
+    ip_whitelist: Mapped[str] = mapped_column(String, default="127.0.0.1\n192.168.1.1\n10.0.0.0/8")
+    
+    # AI settings
+    ai_analysis_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    
+    # Monitoring settings
+    process_monitor_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    network_monitor_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    log_collector_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    file_scanner_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    # Notification settings
+    browser_notifications: Mapped[bool] = mapped_column(Boolean, default=True)
+    sound_alerts: Mapped[bool] = mapped_column(Boolean, default=False)
+    email_alerts: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

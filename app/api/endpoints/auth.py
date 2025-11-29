@@ -11,6 +11,7 @@ from sqlalchemy import select
 from app.core.config import settings
 import logging
 from datetime import datetime
+from app.services.audit_service import AuditService
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,17 @@ async def login_access_token(
             expires_delta=access_token_expires
         )
         logger.info(f"Successful login for user: {form_data.username}")
+        
+        # Audit log: successful login
+        await AuditService.log(
+            db,
+            action=AuditService.ACTION_LOGIN,
+            description=f"User {user.email} logged in",
+            source=AuditService.SOURCE_DASHBOARD,
+            severity="INFO",
+            user_id=user.id
+        )
+        
         return Token(
             access_token=token,
             token_type="bearer"
@@ -91,6 +103,16 @@ async def create_user(
         await db.commit()
         await db.refresh(db_user)
         logger.info(f"Successfully created user: {user_in.email}")
+        
+        # Audit log: user registered
+        await AuditService.log(
+            db,
+            action=AuditService.ACTION_REGISTER,
+            description=f"New user registered: {user_in.email}",
+            source=AuditService.SOURCE_DASHBOARD,
+            severity="INFO",
+            user_id=db_user.id
+        )
         
         # Convert to response model
         return UserModel.model_validate(db_user)

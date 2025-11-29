@@ -5,7 +5,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from app.core.config import settings
 # Gradually add routers one by one to isolate any issues
-from app.api.endpoints import auth, incidents, analysis, threats, ai, auto_response, monitoring, logs, windows, audit
+from app.api.endpoints import auth, incidents, analysis, threats, ai, auto_response, monitoring, logs, windows, audit, agents, virustotal
+from app.api.endpoints import settings as user_settings
 from app.db.base import Base, engine
 import logging
 from datetime import datetime
@@ -58,6 +59,9 @@ api_router.include_router(monitoring.router, prefix="/monitoring", tags=["monito
 api_router.include_router(logs.router, prefix="/logs", tags=["logs"])
 api_router.include_router(windows.router, prefix="/windows", tags=["windows"])
 api_router.include_router(audit.router, prefix="/audit", tags=["audit"])
+api_router.include_router(agents.router, prefix="/agents", tags=["agents"])
+api_router.include_router(user_settings.router, prefix="/settings", tags=["settings"])
+api_router.include_router(virustotal.router, prefix="/virustotal", tags=["virustotal"])
 
 # Add proxy endpoint to forward requests to the API
 @app.get("/api/proxy/threats/recent")
@@ -178,6 +182,14 @@ async def startup_event():
     except Exception as e:
         logger.warning(f"Failed to check AI dependencies status: {str(e)}")
         logger.exception("AI dependency check error:")
+    
+    try:
+        # Start autonomous system monitor
+        from app.services.autonomous_monitor import start_autonomous_monitor
+        await start_autonomous_monitor()
+        logger.info("🤖 Autonomous Monitor started - self-healing enabled")
+    except Exception as e:
+        logger.warning(f"Failed to start autonomous monitor: {str(e)}")
 
 @app.on_event("shutdown")
 async def shutdown_event():

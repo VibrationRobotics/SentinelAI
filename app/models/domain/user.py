@@ -6,6 +6,7 @@ class UserBase(BaseModel):
     email: EmailStr
     full_name: str
     is_active: bool = True
+    role: str = "user"  # admin, user, viewer
 
     model_config = ConfigDict(from_attributes=True)
 

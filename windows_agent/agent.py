@@ -79,11 +79,18 @@ class WindowsAgent:
     Monitors the Windows host and reports to the Docker dashboard.
     """
     
-    def __init__(self, dashboard_url: str = "http://localhost:8015"):
+    def __init__(self, dashboard_url: str = "http://localhost:8015", api_key: str = None):
         self.dashboard_url = dashboard_url.rstrip('/')
         self.api_base = f"{self.dashboard_url}/api/v1"
+        self.api_key = api_key or os.environ.get('SENTINEL_API_KEY')
         self.running = False
         self.event_queue = queue.Queue()
+        
+        # Log API key status
+        if self.api_key:
+            logger.info(f"API key configured: {self.api_key[:12]}...")
+        else:
+            logger.warning("No API key configured - using unauthenticated mode")
         
         # Monitoring state
         self.known_processes: Dict[int, Dict] = {}
@@ -175,6 +182,26 @@ class WindowsAgent:
         logger.info(f"Windows Agent initialized - Dashboard: {self.dashboard_url}")
         logger.info(f"AI-powered analysis: {'Enabled' if self.use_ai else 'Disabled'}")
         logger.info(f"Hybrid ML detector: {'Enabled' if self.hybrid_detector else 'Disabled (install ml_detector.py)'}")
+    
+    def _get_headers(self) -> Dict[str, str]:
+        """Get HTTP headers including API key if configured."""
+        headers = {'Content-Type': 'application/json'}
+        if self.api_key:
+            headers['X-API-Key'] = self.api_key
+        return headers
+    
+    def _api_post(self, endpoint: str, data: Dict, timeout: int = 10) -> Optional[requests.Response]:
+        """Make authenticated POST request to API."""
+        try:
+            return requests.post(
+                f"{self.api_base}/{endpoint}",
+                json=data,
+                headers=self._get_headers(),
+                timeout=timeout
+            )
+        except Exception as e:
+            logger.debug(f"API request failed: {e}")
+            return None
     
     def start(self):
         """Start the Windows agent."""
@@ -304,11 +331,14 @@ class WindowsAgent:
             response = requests.post(
                 f"{self.api_base}/windows/agent/register",
                 json=data,
+                headers=self._get_headers(),
                 timeout=5
             )
             
             if response.status_code == 200:
                 logger.info("Successfully registered with dashboard")
+            elif response.status_code == 401:
+                logger.error("API key rejected - check your SENTINEL_API_KEY is valid")
             else:
                 logger.warning(f"Could not register with dashboard: {response.status_code}")
         except Exception as e:

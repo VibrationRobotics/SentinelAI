@@ -70,20 +70,23 @@ SentinelAI is an intelligent cybersecurity system that provides **real-time thre
 | Integration | Description |
 |-------------|-------------|
 | **OpenAI GPT-4** | Intelligent threat analysis and remediation suggestions |
+| **VirusTotal** | Hash, URL, IP, and domain reputation lookups |
 | **AVG Antivirus** | Parse AVG/Avast logs for threat detections |
 | **Windows Defender** | Integration with Windows Security Center |
 | **Snort IDS** | Ingest alerts from Snort intrusion detection system |
 | **Docker Projects** | Connect any Docker container for centralized monitoring |
 | **REST API** | Full API for custom integrations and automation |
 
-### Desktop Application
+### Desktop Application (Coming Soon)
 | Feature | Description |
 |---------|-------------|
-| **Tauri Desktop App** | Native Windows application with embedded agent |
+| **Tauri Desktop App** | Native Windows application with embedded agent (in development) |
 | **System Tray** | Background protection with tray icon |
 | **Real-time Status** | Live agent status and threat count |
 | **Activity Logs** | View all security events in-app |
 | **One-Click Deploy** | Single exe distribution for endpoints |
+
+> **Note**: The desktop app is currently in development. For now, use the standalone Windows agent with `run_agent.bat`.
 
 ---
 
@@ -99,7 +102,15 @@ docker-compose up -d
 
 Dashboard available at: **http://localhost:8015**
 
-### Step 2: Run an Agent
+### Step 2: Create an API Key
+
+1. Open the dashboard at **http://localhost:8015**
+2. Login with default credentials: `admin@sentinel.ai` / `test1234`
+3. Go to **Settings** (gear icon) → **API Keys** tab
+4. Click **Create** to generate a new API key
+5. **Copy the key immediately** - it won't be shown again!
+
+### Step 3: Run an Agent
 
 <details>
 <summary><b>🪟 Windows Agent</b></summary>
@@ -107,11 +118,16 @@ Dashboard available at: **http://localhost:8015**
 ```powershell
 # Open PowerShell as Administrator
 cd SentinelAI\windows_agent
+
+# Edit run_agent.bat and add your API key:
+# set SENTINEL_API_KEY=sk_live_your_key_here
+
 .\run_agent.bat
 ```
 
 Or manually:
 ```powershell
+$env:SENTINEL_API_KEY = "sk_live_your_key_here"
 python -m venv venv
 .\venv\Scripts\activate
 pip install -r requirements.txt
@@ -183,28 +199,72 @@ The desktop app includes:
 
 ## 📦 Architecture
 
+### System Overview
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     SentinelAI Dashboard                         │
-│                    (Docker - port 8015)                          │
+│                 CENTRAL DASHBOARD (Docker)                      │
 │  ┌─────────────┬─────────────┬─────────────┬──────────────────┐ │
 │  │  FastAPI    │  PostgreSQL │    Redis    │     Web UI       │ │
-│  │  Backend    │  Database   │    Cache    │   Dashboard      │ │
+│  │  + JWT Auth │  + Users    │  + Sessions │   + Admin Panel  │ │
+│  │  + OpenAI   │  + Threats  │  + Cache    │   + Real-time    │ │
+│  │  + VT API   │  + Agents   │             │   + Charts       │ │
 │  └─────────────┴─────────────┴─────────────┴──────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
-                               │
+                               │ REST API (port 8015)
              ┌─────────────────┼─────────────────┐
              ▼                 ▼                 ▼
 ┌───────────────────┐ ┌───────────────┐ ┌───────────────────┐
 │   Windows Agent   │ │  Linux Agent  │ │   macOS Agent     │
-│   (run_agent.bat) │ │ (run_agent.sh)│ │  (run_agent.sh)   │
+│   (25 monitors)   │ │ (run_agent.sh)│ │  (run_agent.sh)   │
 ├───────────────────┤ ├───────────────┤ ├───────────────────┤
 │ • Process Monitor │ │ • Process Mon │ │ • Process Monitor │
 │ • Network Monitor │ │ • Network Mon │ │ • Network Monitor │
 │ • Event Log Parse │ │ • Auth Log    │ │ • System Log      │
-│ • Windows Firewal │ │ • iptables    │ │ • pf firewall     │
-│ • AI Analysis     │ │ • AI Analysis │ │ • AI Analysis     │
+│ • Registry Watch  │ │ • iptables    │ │ • pf firewall     │
+│ • USB/DNS/WMI/DLL │ │ • AI Analysis │ │ • AI Analysis     │
 └───────────────────┘ └───────────────┘ └───────────────────┘
+```
+
+### Authentication Flow
+```
+┌─────────────┐     ┌────────────────┐     ┌───────────────┐
+│   Browser   │     │    Dashboard   │     │   PostgreSQL  │
+│   (User)    │     │    (FastAPI)   │     │   (Users DB)  │
+└──────┬──────┘     └───────┬────────┘     └───────┬───────┘
+       │                    │                    │
+       │  1. POST /login    │                    │
+       │──────────────────>│  2. Verify user    │
+       │                    │──────────────────>│
+       │                    │<──────────────────│
+       │  3. JWT Token      │                    │
+       │<──────────────────│                    │
+       │                    │                    │
+       │  4. API calls      │                    │
+       │  (Bearer token)    │                    │
+       │──────────────────>│                    │
+
+┌─────────────┐     ┌────────────────┐
+│    Agent    │     │    Dashboard   │
+│  (Windows)  │     │    (FastAPI)   │
+└──────┬──────┘     └───────┬────────┘
+       │                    │
+       │  X-API-Key header  │
+       │  (sk_live_xxx)     │
+       │──────────────────>│
+       │                    │
+       │  Validated ✓       │
+       │<──────────────────│
+```
+
+### Database Schema
+```sql
+-- Core Tables
+users (id, email, password_hash, full_name, role, is_active)
+api_keys (id, user_id, key_hash, name, is_active, last_used)
+agent_licenses (id, user_id, tier, max_agents, max_events_per_day)
+agents (id, hostname, platform, status, last_seen, api_key_id)
+threats (id, source_ip, threat_type, severity, description, ai_analysis)
+audit_logs (id, user_id, action, details, timestamp)
 ```
 
 ---
@@ -256,9 +316,22 @@ Key variables:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `OPENAI_API_KEY` | OpenAI API key for GPT-4 analysis | Required |
+| `VIRUSTOTAL_API_KEY` | VirusTotal API key for hash/URL scanning | Optional |
 | `DATABASE_URL` | PostgreSQL connection string | Auto-configured |
 | `REDIS_URL` | Redis connection string | Auto-configured |
 | `DASHBOARD_PORT` | Dashboard port | `8015` |
+
+### Default Credentials
+| Email | Password | Role |
+|-------|----------|------|
+| `admin@sentinel.ai` | `test1234` | Admin |
+
+### Subscription Tiers
+| Tier | Max Agents | Max Events/Day | AI Analysis |
+|------|------------|----------------|-------------|
+| Free | 1 | 1,000 | ✅ |
+| Pro | 5 | 10,000 | ✅ |
+| Enterprise | 100 | 100,000 | ✅ |
 
 ### Docker Commands
 
@@ -338,6 +411,62 @@ Content-Type: application/json
 GET /api/v1/windows/agent/list
 ```
 
+### VirusTotal Lookups
+```http
+# Check file hash (requires auth + VT API key)
+POST /api/v1/virustotal/check/hash
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{"hash": "44d88612fea8a8f36de82e1278abb02f"}
+
+# Check URL reputation
+POST /api/v1/virustotal/check/url
+{"url": "http://example.com/suspicious"}
+
+# Check IP reputation
+POST /api/v1/virustotal/check/ip
+{"ip": "8.8.8.8"}
+
+# Check domain reputation
+POST /api/v1/virustotal/check/domain
+{"domain": "example.com"}
+
+# Get VT service status (no auth required)
+GET /api/v1/virustotal/status
+```
+
+### Authentication Endpoints
+```http
+# Login (get JWT token)
+POST /api/v1/auth/login
+Content-Type: application/x-www-form-urlencoded
+username=admin@sentinel.ai&password=test1234
+
+# Register new user
+POST /api/v1/auth/register
+{"email": "user@example.com", "password": "password123", "full_name": "John Doe"}
+
+# Get current user
+GET /api/v1/auth/me
+Authorization: Bearer <token>
+```
+
+### Admin Endpoints (Admin role required)
+```http
+# List all users
+GET /api/v1/settings/admin/users
+
+# Update user role
+PUT /api/v1/settings/admin/users/{id}/role?role=admin
+
+# Update user tier
+PUT /api/v1/settings/admin/users/{id}/tier?tier=pro
+
+# Enable/disable user
+PUT /api/v1/settings/admin/users/{id}/status?is_active=false
+```
+
 Full API documentation available at:
 - **Swagger UI**: http://localhost:8015/docs
 - **ReDoc**: http://localhost:8015/redoc
@@ -350,13 +479,17 @@ Full API documentation available at:
 SentinelAI/
 ├── app/
 │   ├── api/endpoints/          # API endpoints
+│   │   ├── auth.py             # Authentication (JWT)
 │   │   ├── threats.py          # Threat analysis
 │   │   ├── windows.py          # Windows/Agent APIs
+│   │   ├── settings.py         # User settings & admin
+│   │   ├── virustotal.py       # VirusTotal lookups
 │   │   ├── monitoring.py       # Monitoring status
 │   │   ├── auto_response.py    # Auto-response config
 │   │   └── logs.py             # Log collection
 │   ├── services/               # Core services
 │   │   ├── openai_service.py   # GPT-4 integration
+│   │   ├── virustotal_service.py # VirusTotal API
 │   │   ├── network_monitor.py  # Network monitoring
 │   │   ├── process_monitor.py  # Process monitoring
 │   │   ├── file_scanner.py     # File scanning
@@ -364,13 +497,17 @@ SentinelAI/
 │   │   └── auto_response_service.py
 │   ├── static/                 # Frontend assets
 │   │   ├── index.html          # Dashboard UI
-│   │   ├── js/                 # JavaScript
+│   │   ├── js/auth.js          # Authentication
+│   │   ├── js/settingsManager.js # Settings UI
 │   │   └── css/                # Stylesheets
 │   └── main.py                 # Application entry
 ├── windows_agent/              # Windows agent
 │   ├── agent.py                # Agent script
 │   ├── run_agent.bat           # Windows startup
 │   └── requirements.txt
+├── sentinel-desktop/           # Tauri desktop app
+│   ├── src-tauri/              # Rust backend
+│   └── index.html              # Desktop UI
 ├── linux_agent/                # Linux/macOS agent
 │   ├── agent.py                # Agent script
 │   ├── run_agent.sh            # Unix startup
@@ -385,6 +522,18 @@ SentinelAI/
 ---
 
 ## 📜 Version History
+
+### v1.5.0 (November 2025) - Enterprise & VirusTotal
+- ✨ **User Authentication** - JWT-based login/register with bcrypt
+- ✨ **Role-Based Access Control** - Admin, User, Viewer roles
+- ✨ **Admin Panel** - Manage users, tiers, roles from dashboard
+- ✨ **API Key Authentication** - Agents require API key to register
+- ✨ **Subscription Tiers** - Free (1 agent), Pro (5), Enterprise (100)
+- ✨ **VirusTotal Integration** - Hash/URL/IP/domain reputation lookups
+- ✨ **Rate Limiting** - VT free tier: 4/min, 500/day with 24h cache
+- 🔧 Dynamic navbar with user name and role badge
+- 🔧 Profile modal with password change
+- 🔧 Cleaned up dashboard (removed non-functional buttons)
 
 ### v1.4.0 (November 2025) - Complete Security Suite
 - ✨ **Hybrid ML/Rule Detection** - 95%+ cost savings vs pure AI

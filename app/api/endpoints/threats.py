@@ -8,14 +8,17 @@ import logging
 import time
 import random
 import asyncio
+from sqlalchemy import select, desc
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.domain.threat import ThreatData, ThreatResponse
 from app.services.threat_detection import ThreatDetectionService
 from app.services.openai_service import get_openai_service
 from app.services.geolocation_service import enrich_threat_with_location
 from app.services.remediation_service import get_remediation_service
 from app.services.auto_response_service import get_auto_response_service
-from app.db.models import User
-from app.api.deps import get_current_user
+from app.db.models import User, ThreatEvent
+from app.api.deps import get_current_user, get_db
+from app.services.audit_service import AuditService, log_threat_detected, log_ai_analysis, log_user_action
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -42,15 +45,36 @@ class ThreatResponse(BaseModel):
 # Initialize the threat detection service
 threat_service = ThreatDetectionService()
 
-# Temporary in-memory storage for threats and jobs
-# In production, this would be a database
-_recent_threats = []
+# Job statuses still in memory (short-lived)
 _job_statuses = {}
 _MAX_RECENT_THREATS = 100
+
+# Helper to convert ThreatEvent to dict
+def threat_event_to_dict(event: ThreatEvent) -> dict:
+    return {
+        "id": event.id,
+        "timestamp": event.timestamp.isoformat() if event.timestamp else None,
+        "severity": event.severity,
+        "description": event.description,
+        "source_ip": event.source_ip,
+        "confidence": event.confidence_score,
+        "techniques": event.mitre_techniques.get("techniques", []) if event.mitre_techniques else [],
+        "status": event.status,
+        "resolved": event.status == "RESOLVED",
+        "blocked": event.status == "BLOCKED",
+        "resolved_by": event.resolved_by,
+        "resolved_at": event.resolved_at.isoformat() if event.resolved_at else None,
+        "latitude": event.indicators.get("latitude") if event.indicators else None,
+        "longitude": event.indicators.get("longitude") if event.indicators else None,
+        "location": event.indicators.get("location") if event.indicators else None,
+        "threat_type": event.indicators.get("threat_type") if event.indicators else "Unknown",
+        "ai_analyzed": event.indicators.get("ai_analyzed", False) if event.indicators else False,
+    }
 
 @router.post("/analyze")
 async def analyze_threat(
     threat_data: ThreatData,
+    db: AsyncSession = Depends(get_db)
 ) -> JSONResponse:
     """
     Analyze potential security threat data using AI
@@ -104,11 +128,44 @@ async def analyze_threat(
         # Add geolocation data
         analyzed_threat = enrich_threat_with_location(analyzed_threat)
         
-        _recent_threats.append(analyzed_threat)
-        
-        # Trim the list if needed
-        if len(_recent_threats) > _MAX_RECENT_THREATS:
-            _recent_threats.pop(0)
+        # Save to database
+        try:
+            threat_event = ThreatEvent(
+                id=threat_id,
+                timestamp=datetime.utcnow(),
+                severity=severity,
+                description=description or f"Threat from {threat_data.source_ip}",
+                source_ip=threat_data.source_ip,
+                confidence_score=confidence,
+                indicators={
+                    "latitude": analyzed_threat.get("latitude"),
+                    "longitude": analyzed_threat.get("longitude"),
+                    "location": analyzed_threat.get("location"),
+                    "threat_type": threat_type,
+                    "ai_analyzed": ai_analysis is not None,
+                    "recommendation": recommendation,
+                    "remediation_steps": remediation_steps,
+                },
+                target_systems=[],
+                mitre_techniques={"techniques": techniques},
+                status="OPEN"
+            )
+            db.add(threat_event)
+            await db.commit()
+            logger.info(f"Threat {threat_id} saved to database")
+            
+            # Audit log: threat detected
+            await log_threat_detected(
+                db, threat_id, threat_data.source_ip, severity,
+                f"Threat detected from {threat_data.source_ip}: {description or threat_type}"
+            )
+            
+            # Audit log: AI analysis (if used)
+            if ai_analysis:
+                await log_ai_analysis(db, threat_id, severity, confidence, {"techniques": techniques})
+        except Exception as db_error:
+            logger.error(f"Failed to save threat to database: {db_error}")
+            await db.rollback()
         
         # Evaluate for auto-response
         auto_response_result = None
@@ -206,59 +263,99 @@ async def check_analysis_status(
     )
 
 @router.get("")
-async def get_all_threats() -> JSONResponse:
+async def get_all_threats(db: AsyncSession = Depends(get_db)) -> JSONResponse:
     """
-    Get all threats (alias for /recent for compatibility)
+    Get all threats from database
     """
-    return JSONResponse(
-        status_code=status.HTTP_200_OK,
-        content=_recent_threats
-    )
+    try:
+        result = await db.execute(
+            select(ThreatEvent).order_by(desc(ThreatEvent.timestamp)).limit(_MAX_RECENT_THREATS)
+        )
+        threats = result.scalars().all()
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=[threat_event_to_dict(t) for t in threats]
+        )
+    except Exception as e:
+        logger.error(f"Error fetching threats: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=[]
+        )
 
 @router.get("/recent")
-async def get_recent_threats() -> JSONResponse:
+async def get_recent_threats(db: AsyncSession = Depends(get_db)) -> JSONResponse:
     """
-    Get recent threats that have been analyzed
+    Get recent threats from database
     """
-    return JSONResponse(
-        status_code=status.HTTP_200_OK,
-        content=_recent_threats
-    )
+    try:
+        result = await db.execute(
+            select(ThreatEvent).order_by(desc(ThreatEvent.timestamp)).limit(_MAX_RECENT_THREATS)
+        )
+        threats = result.scalars().all()
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=[threat_event_to_dict(t) for t in threats]
+        )
+    except Exception as e:
+        logger.error(f"Error fetching recent threats: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=[]
+        )
 
 @router.post("/{threat_id}/resolve")
 async def resolve_threat(
     threat_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ) -> JSONResponse:
     """
     Mark a threat as resolved after investigation
     """
     try:
-        # Find the threat in our temporary storage
-        threat_index = next((i for i, t in enumerate(_recent_threats) if t.get("id") == threat_id), None)
+        # Find the threat in database
+        result = await db.execute(select(ThreatEvent).where(ThreatEvent.id == threat_id))
+        threat = result.scalar_one_or_none()
         
-        if threat_index is None:
+        if threat is None:
             return JSONResponse(
                 status_code=status.HTTP_404_NOT_FOUND,
                 content={"error": f"Threat with ID {threat_id} not found"}
             )
         
         # Update the threat status
-        _recent_threats[threat_index]["status"] = "RESOLVED"
-        _recent_threats[threat_index]["resolved_by"] = current_user.username
-        _recent_threats[threat_index]["resolved_at"] = datetime.utcnow().isoformat()
+        threat.status = "RESOLVED"
+        threat.resolved_by = current_user.id
+        threat.resolved_at = datetime.utcnow()
         
-        logger.info(f"Threat {threat_id} resolved by {current_user.username}")
+        await db.commit()
+        await db.refresh(threat)
+        
+        logger.info(f"Threat {threat_id} resolved by {current_user.email}")
+        
+        # Audit log: threat resolved
+        await AuditService.log(
+            db,
+            action=AuditService.ACTION_THREAT_RESOLVED,
+            description=f"Threat {threat_id} resolved by {current_user.email}",
+            source=AuditService.SOURCE_DASHBOARD,
+            severity="INFO",
+            user_id=current_user.id,
+            ip_address=threat.source_ip,
+            details={"threat_id": threat_id}
+        )
         
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={
                 "message": f"Threat {threat_id} marked as resolved",
-                "threat": _recent_threats[threat_index]
+                "threat": threat_event_to_dict(threat)
             }
         )
     except Exception as e:
         logger.error(f"Error resolving threat: {str(e)}")
+        await db.rollback()
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"error": f"Failed to resolve threat: {str(e)}"}
@@ -267,23 +364,25 @@ async def resolve_threat(
 @router.post("/{threat_id}/block")
 async def block_threat(
     threat_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ) -> JSONResponse:
     """
     Block the source IP of a threat
     """
     try:
-        # Find the threat in our temporary storage
-        threat_index = next((i for i, t in enumerate(_recent_threats) if t.get("id") == threat_id), None)
+        # Find the threat in database
+        result = await db.execute(select(ThreatEvent).where(ThreatEvent.id == threat_id))
+        threat = result.scalar_one_or_none()
         
-        if threat_index is None:
+        if threat is None:
             return JSONResponse(
                 status_code=status.HTTP_404_NOT_FOUND,
                 content={"error": f"Threat with ID {threat_id} not found"}
             )
         
         # Get the source IP
-        source_ip = _recent_threats[threat_index].get("source_ip")
+        source_ip = threat.source_ip
         if not source_ip:
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -291,23 +390,36 @@ async def block_threat(
             )
         
         # Update the threat status
-        _recent_threats[threat_index]["status"] = "BLOCKED"
-        _recent_threats[threat_index]["blocked_by"] = current_user.username
-        _recent_threats[threat_index]["blocked_at"] = datetime.utcnow().isoformat()
+        threat.status = "BLOCKED"
+        
+        await db.commit()
+        await db.refresh(threat)
         
         # In a real-world scenario, you would integrate with a firewall or IPS here
-        # For now, we'll just simulate the blocking
-        logger.info(f"Source IP {source_ip} from threat {threat_id} blocked by {current_user.username}")
+        logger.info(f"Source IP {source_ip} from threat {threat_id} blocked by {current_user.email}")
+        
+        # Audit log: IP blocked
+        await AuditService.log(
+            db,
+            action=AuditService.ACTION_IP_BLOCKED,
+            description=f"IP {source_ip} blocked by {current_user.email} (threat {threat_id})",
+            source=AuditService.SOURCE_DASHBOARD,
+            severity="WARNING",
+            user_id=current_user.id,
+            ip_address=source_ip,
+            details={"threat_id": threat_id, "blocked_ip": source_ip}
+        )
         
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={
                 "message": f"Source IP {source_ip} from threat {threat_id} has been blocked",
-                "threat": _recent_threats[threat_index]
+                "threat": threat_event_to_dict(threat)
             }
         )
     except Exception as e:
         logger.error(f"Error blocking threat: {str(e)}")
+        await db.rollback()
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"error": f"Failed to block threat: {str(e)}"}

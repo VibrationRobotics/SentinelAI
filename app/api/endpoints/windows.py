@@ -14,7 +14,8 @@ import logging
 
 from app.services.windows_firewall import get_windows_firewall, FirewallRule
 from app.db.base import get_session
-from app.db.models import Agent, SecurityEvent, BlockedIP, AuditLog
+from app.db.models import Agent, SecurityEvent, BlockedIP, AuditLog, APIKey
+from app.api.deps import validate_api_key
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -279,8 +280,27 @@ class AgentRegistration(BaseModel):
 
 
 @router.post("/agent/register")
-async def register_agent(registration: AgentRegistration, db: AsyncSession = Depends(get_session)) -> JSONResponse:
-    """Register a Windows agent with the dashboard (PostgreSQL persistent storage)."""
+async def register_agent(
+    registration: AgentRegistration, 
+    db: AsyncSession = Depends(get_session),
+    api_key: Optional[APIKey] = Depends(validate_api_key)
+) -> JSONResponse:
+    """Register a Windows agent with the dashboard (PostgreSQL persistent storage).
+    
+    Requires a valid API key in the X-API-Key header.
+    Get an API key from Dashboard > Settings > API Keys.
+    """
+    # Require API key for agent registration
+    if not api_key:
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={
+                "success": False, 
+                "error": "API key required",
+                "detail": "Get an API key from Dashboard > Settings > API Keys"
+            }
+        )
+    
     try:
         # Check if agent already exists
         result = await db.execute(select(Agent).filter(Agent.hostname == registration.hostname))

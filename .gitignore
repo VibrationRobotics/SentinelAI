@@ -77,3 +77,9 @@ PLAN.md
 # Ignore default SQLite database files
 snort_threats.db
 test_threats.db
+
+# Tauri Desktop App (in development - not ready for release)
+sentinel-desktop/
+*.exe
+*.msi
+*.nsis
