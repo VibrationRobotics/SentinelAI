@@ -7,7 +7,7 @@ from .feature_extractor import AdvancedFeatureExtractor
 from .behavioral_analyzer import BehavioralSequenceAnalyzer, BehavioralEvent
 from .anomaly_detector import BaselineAnomalyDetector
 from .ensemble_model import EnsembleThreatModel
-from .threat_detector import AdvancedThreatDetector, ThreatPrediction
+from .threat_detector import AdvancedThreatDetector, ThreatPrediction, get_advanced_detector
 from .mitre_mapping import MITRE_TECHNIQUES, map_to_mitre
 
 __all__ = [
@@ -18,6 +18,7 @@ __all__ = [
     'EnsembleThreatModel',
     'AdvancedThreatDetector',
     'ThreatPrediction',
+    'get_advanced_detector',
     'MITRE_TECHNIQUES',
     'map_to_mitre',
 ]
