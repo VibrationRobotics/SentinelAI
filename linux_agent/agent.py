@@ -1,7 +1,24 @@
 #!/usr/bin/env python3
 """
-SentinelAI Linux/macOS Agent
-Native agent for Unix-based systems that monitors and reports to the Docker dashboard.
+SentinelAI Linux/macOS Agent v2.0
+Native agent for Unix-based systems with comprehensive security monitoring.
+
+Monitors:
+- Cron jobs - Detect new/modified cron jobs
+- SSH keys - Watch authorized_keys changes  
+- Sudo logs - Track privilege escalation
+- Kernel modules - Detect rootkit modules
+- LD_PRELOAD - Detect library injection
+- Setuid binaries - Track setuid changes
+- Container escape - Monitor for breakout attempts
+- Auditd - Parse audit logs
+- SELinux/AppArmor - Security policy violations
+- Package manager - Detect unauthorized installs
+- Systemd services - New/modified services
+- File integrity - Hash critical system files
+- Process monitoring - Suspicious process detection
+- Network monitoring - Suspicious connections
+- Auth log monitoring - Failed logins, brute force
 """
 
 import os
@@ -14,9 +31,13 @@ import platform
 import threading
 import subprocess
 import argparse
+import hashlib
+import re
+import glob
 from datetime import datetime
-from dataclasses import dataclass, asdict
-from typing import Dict, List, Optional
+from dataclasses import dataclass, asdict, field
+from typing import Dict, List, Optional, Set, Tuple
+from pathlib import Path
 
 # Check for required modules
 try:
@@ -46,19 +67,30 @@ class SecurityEvent:
 
 
 class LinuxAgent:
-    """SentinelAI Linux/macOS Agent for native system monitoring."""
+    """SentinelAI Linux/macOS Agent v2.0 with comprehensive security monitoring."""
     
-    def __init__(self, dashboard_url: str = "http://localhost:8015"):
+    def __init__(self, dashboard_url: str = "http://localhost:8015", api_key: str = None):
         self.dashboard_url = dashboard_url.rstrip('/')
         self.api_base = f"{self.dashboard_url}/api/v1"
+        self.api_key = api_key or os.environ.get('SENTINEL_API_KEY', '')
         self.running = False
         self.event_queue = queue.Queue()
         self.platform = platform.system()  # 'Linux' or 'Darwin' (macOS)
         
         # Monitoring state
         self.known_processes: Dict[int, Dict] = {}
-        self.suspicious_ips: set = set()
-        self.blocked_ips: set = set()
+        self.suspicious_ips: Set[str] = set()
+        self.blocked_ips: Set[str] = set()
+        
+        # New monitoring state for advanced monitors
+        self.known_cron_jobs: Dict[str, str] = {}  # path -> hash
+        self.known_ssh_keys: Dict[str, str] = {}  # path -> hash
+        self.known_kernel_modules: Set[str] = set()
+        self.known_setuid_binaries: Dict[str, int] = {}  # path -> mode
+        self.known_systemd_services: Set[str] = set()
+        self.known_packages: Set[str] = set()
+        self.file_integrity_hashes: Dict[str, str] = {}  # path -> hash
+        self.known_containers: Set[str] = set()
         
         # Suspicious patterns
         self.suspicious_executables = [
@@ -102,7 +134,23 @@ class LinuxAgent:
         self.use_ai = True
         self.ai_cache: Dict[str, Dict] = {}
         
-        logger.info(f"Linux/macOS Agent initialized - Dashboard: {self.dashboard_url}")
+        # Critical files to monitor for integrity
+        self.critical_files = [
+            '/etc/passwd', '/etc/shadow', '/etc/sudoers',
+            '/etc/ssh/sshd_config', '/etc/pam.d/sshd',
+            '/etc/ld.so.preload', '/etc/ld.so.conf',
+            '/etc/hosts', '/etc/resolv.conf',
+            '/root/.bashrc', '/root/.bash_profile',
+        ]
+        
+        # Suspicious kernel modules (rootkits)
+        self.suspicious_modules = [
+            'diamorphine', 'reptile', 'suterusu', 'adore-ng',
+            'knark', 'rial', 'heroin', 'override',
+        ]
+        
+        logger.info(f"Linux/macOS Agent v2.0 initialized - Dashboard: {self.dashboard_url}")
+        logger.info(f"API Key: {'Configured' if self.api_key else 'Not set'}")
         logger.info(f"Platform: {self.platform}")
     
     def start(self):
@@ -117,17 +165,34 @@ class LinuxAgent:
         logger.info(f"Dashboard: {self.dashboard_url}")
         logger.info("=" * 50)
         
-        # Start monitoring threads
+        # Start monitoring threads - Core monitors
         threads = [
-            threading.Thread(target=self._process_monitor_loop, daemon=True),
-            threading.Thread(target=self._network_monitor_loop, daemon=True),
-            threading.Thread(target=self._auth_log_monitor_loop, daemon=True),
-            threading.Thread(target=self._event_sender_loop, daemon=True),
-            threading.Thread(target=self._heartbeat_loop, daemon=True),
+            threading.Thread(target=self._process_monitor_loop, daemon=True, name='process'),
+            threading.Thread(target=self._network_monitor_loop, daemon=True, name='network'),
+            threading.Thread(target=self._auth_log_monitor_loop, daemon=True, name='authlog'),
+            threading.Thread(target=self._event_sender_loop, daemon=True, name='sender'),
+            threading.Thread(target=self._heartbeat_loop, daemon=True, name='heartbeat'),
         ]
+        
+        # Advanced monitors (Linux-specific)
+        if self.platform == 'Linux':
+            threads.extend([
+                threading.Thread(target=self._cron_monitor_loop, daemon=True, name='cron'),
+                threading.Thread(target=self._ssh_key_monitor_loop, daemon=True, name='sshkeys'),
+                threading.Thread(target=self._kernel_module_monitor_loop, daemon=True, name='kernel'),
+                threading.Thread(target=self._ld_preload_monitor_loop, daemon=True, name='ldpreload'),
+                threading.Thread(target=self._setuid_monitor_loop, daemon=True, name='setuid'),
+                threading.Thread(target=self._systemd_monitor_loop, daemon=True, name='systemd'),
+                threading.Thread(target=self._package_monitor_loop, daemon=True, name='packages'),
+                threading.Thread(target=self._file_integrity_monitor_loop, daemon=True, name='integrity'),
+                threading.Thread(target=self._container_escape_monitor_loop, daemon=True, name='container'),
+                threading.Thread(target=self._auditd_monitor_loop, daemon=True, name='auditd'),
+                threading.Thread(target=self._selinux_monitor_loop, daemon=True, name='selinux'),
+            ])
         
         for t in threads:
             t.start()
+            logger.info(f"{t.name} monitor started")
         
         # Register with dashboard
         self._register_agent()
@@ -149,20 +214,37 @@ class LinuxAgent:
             except Exception as e:
                 logger.debug(f"Heartbeat error: {e}")
     
+    def _get_headers(self) -> Dict[str, str]:
+        """Get headers for API requests including API key."""
+        headers = {'Content-Type': 'application/json'}
+        if self.api_key:
+            headers['X-API-Key'] = self.api_key
+        return headers
+    
     def _register_agent(self):
         """Register this agent with the dashboard."""
         try:
+            capabilities = ['process', 'network', 'authlog', 'firewall', 'ai']
+            if self.platform == 'Linux':
+                capabilities.extend([
+                    'cron', 'sshkeys', 'kernel', 'ldpreload', 'setuid',
+                    'systemd', 'packages', 'integrity', 'container',
+                    'auditd', 'selinux'
+                ])
+            
             data = {
                 'hostname': platform.node(),
                 'platform': platform.system(),
                 'platform_version': platform.release(),
-                'agent_version': '1.0.0',
-                'capabilities': ['process', 'network', 'authlog', 'firewall', 'ai']
+                'agent_version': '2.0.0',
+                'capabilities': capabilities,
+                'is_admin': os.geteuid() == 0 if hasattr(os, 'geteuid') else False
             }
             
             response = requests.post(
                 f"{self.api_base}/windows/agent/register",  # Same endpoint works for all agents
                 json=data,
+                headers=self._get_headers(),
                 timeout=5
             )
             
@@ -190,12 +272,15 @@ class LinuxAgent:
                         'threat_type': event.event_type,
                         'severity': event.severity,
                         'description': event.description,
-                        'payload': json.dumps(event.details)
+                        'payload': json.dumps(event.details),
+                        'hostname': platform.node(),
+                        'platform': self.platform
                     }
                     
                     response = requests.post(
                         f"{self.api_base}/threats/analyze",
                         json=payload,
+                        headers=self._get_headers(),
                         timeout=10
                     )
                     
@@ -425,6 +510,602 @@ class LinuxAgent:
         except Exception as e:
             logger.error(f"Error blocking IP {ip}: {e}")
             return False
+    
+    # ============== ADVANCED LINUX MONITORS ==============
+    
+    def _get_file_hash(self, filepath: str) -> Optional[str]:
+        """Get SHA256 hash of a file."""
+        try:
+            with open(filepath, 'rb') as f:
+                return hashlib.sha256(f.read()).hexdigest()
+        except (IOError, PermissionError):
+            return None
+    
+    def _cron_monitor_loop(self):
+        """Monitor cron jobs for new/modified entries."""
+        logger.info("Cron monitor started")
+        
+        cron_paths = [
+            '/etc/crontab',
+            '/etc/cron.d/',
+            '/var/spool/cron/crontabs/',
+            '/var/spool/cron/',
+        ]
+        
+        # Initial scan
+        for path in cron_paths:
+            if os.path.isfile(path):
+                self.known_cron_jobs[path] = self._get_file_hash(path) or ''
+            elif os.path.isdir(path):
+                for f in glob.glob(f"{path}/*"):
+                    if os.path.isfile(f):
+                        self.known_cron_jobs[f] = self._get_file_hash(f) or ''
+        
+        logger.info(f"Tracking {len(self.known_cron_jobs)} cron files")
+        
+        while self.running:
+            try:
+                for path in cron_paths:
+                    if os.path.isfile(path):
+                        current_hash = self._get_file_hash(path)
+                        if path not in self.known_cron_jobs:
+                            self._send_event(SecurityEvent(
+                                timestamp=datetime.utcnow().isoformat(),
+                                event_type='cron_added',
+                                severity='HIGH',
+                                source='cron',
+                                description=f'New cron file detected: {path}',
+                                details={'path': path}
+                            ))
+                            logger.warning(f"NEW CRON FILE: {path}")
+                        elif current_hash != self.known_cron_jobs.get(path):
+                            self._send_event(SecurityEvent(
+                                timestamp=datetime.utcnow().isoformat(),
+                                event_type='cron_modified',
+                                severity='HIGH',
+                                source='cron',
+                                description=f'Cron file modified: {path}',
+                                details={'path': path}
+                            ))
+                            logger.warning(f"CRON MODIFIED: {path}")
+                        self.known_cron_jobs[path] = current_hash
+                    
+                    elif os.path.isdir(path):
+                        for f in glob.glob(f"{path}/*"):
+                            if os.path.isfile(f):
+                                current_hash = self._get_file_hash(f)
+                                if f not in self.known_cron_jobs:
+                                    self._send_event(SecurityEvent(
+                                        timestamp=datetime.utcnow().isoformat(),
+                                        event_type='cron_added',
+                                        severity='HIGH',
+                                        source='cron',
+                                        description=f'New cron job detected: {f}',
+                                        details={'path': f}
+                                    ))
+                                    logger.warning(f"NEW CRON JOB: {f}")
+                                self.known_cron_jobs[f] = current_hash
+                
+                time.sleep(30)
+            except Exception as e:
+                logger.debug(f"Cron monitor error: {e}")
+                time.sleep(60)
+    
+    def _ssh_key_monitor_loop(self):
+        """Monitor SSH authorized_keys files for changes."""
+        logger.info("SSH key monitor started")
+        
+        # Find all authorized_keys files
+        ssh_key_paths = []
+        for home in glob.glob('/home/*') + ['/root']:
+            auth_keys = os.path.join(home, '.ssh', 'authorized_keys')
+            if os.path.exists(auth_keys):
+                ssh_key_paths.append(auth_keys)
+                self.known_ssh_keys[auth_keys] = self._get_file_hash(auth_keys) or ''
+        
+        logger.info(f"Tracking {len(ssh_key_paths)} authorized_keys files")
+        
+        while self.running:
+            try:
+                # Check existing files
+                for path in list(self.known_ssh_keys.keys()):
+                    if os.path.exists(path):
+                        current_hash = self._get_file_hash(path)
+                        if current_hash != self.known_ssh_keys[path]:
+                            self._send_event(SecurityEvent(
+                                timestamp=datetime.utcnow().isoformat(),
+                                event_type='ssh_key_modified',
+                                severity='CRITICAL',
+                                source='sshkeys',
+                                description=f'SSH authorized_keys modified: {path}',
+                                details={'path': path}
+                            ))
+                            logger.warning(f"SSH KEYS MODIFIED: {path}")
+                            self.known_ssh_keys[path] = current_hash
+                
+                # Check for new files
+                for home in glob.glob('/home/*') + ['/root']:
+                    auth_keys = os.path.join(home, '.ssh', 'authorized_keys')
+                    if os.path.exists(auth_keys) and auth_keys not in self.known_ssh_keys:
+                        self._send_event(SecurityEvent(
+                            timestamp=datetime.utcnow().isoformat(),
+                            event_type='ssh_key_added',
+                            severity='CRITICAL',
+                            source='sshkeys',
+                            description=f'New authorized_keys file: {auth_keys}',
+                            details={'path': auth_keys}
+                        ))
+                        logger.warning(f"NEW SSH KEYS FILE: {auth_keys}")
+                        self.known_ssh_keys[auth_keys] = self._get_file_hash(auth_keys) or ''
+                
+                time.sleep(30)
+            except Exception as e:
+                logger.debug(f"SSH key monitor error: {e}")
+                time.sleep(60)
+    
+    def _kernel_module_monitor_loop(self):
+        """Monitor loaded kernel modules for rootkits."""
+        logger.info("Kernel module monitor started")
+        
+        # Get initial module list
+        try:
+            result = subprocess.run(['lsmod'], capture_output=True, text=True)
+            for line in result.stdout.strip().split('\n')[1:]:
+                parts = line.split()
+                if parts:
+                    self.known_kernel_modules.add(parts[0])
+            logger.info(f"Tracking {len(self.known_kernel_modules)} kernel modules")
+        except Exception as e:
+            logger.warning(f"Could not get initial module list: {e}")
+        
+        while self.running:
+            try:
+                result = subprocess.run(['lsmod'], capture_output=True, text=True)
+                current_modules = set()
+                
+                for line in result.stdout.strip().split('\n')[1:]:
+                    parts = line.split()
+                    if parts:
+                        module_name = parts[0]
+                        current_modules.add(module_name)
+                        
+                        if module_name not in self.known_kernel_modules:
+                            # Check if it's a known rootkit
+                            severity = 'CRITICAL' if module_name.lower() in self.suspicious_modules else 'HIGH'
+                            
+                            self._send_event(SecurityEvent(
+                                timestamp=datetime.utcnow().isoformat(),
+                                event_type='kernel_module_loaded',
+                                severity=severity,
+                                source='kernel',
+                                description=f'New kernel module loaded: {module_name}',
+                                details={'module': module_name, 'suspicious': module_name.lower() in self.suspicious_modules}
+                            ))
+                            logger.warning(f"NEW KERNEL MODULE: {module_name}")
+                            self.known_kernel_modules.add(module_name)
+                
+                time.sleep(30)
+            except Exception as e:
+                logger.debug(f"Kernel module monitor error: {e}")
+                time.sleep(60)
+    
+    def _ld_preload_monitor_loop(self):
+        """Monitor LD_PRELOAD for library injection attacks."""
+        logger.info("LD_PRELOAD monitor started")
+        
+        preload_file = '/etc/ld.so.preload'
+        last_hash = self._get_file_hash(preload_file) if os.path.exists(preload_file) else None
+        
+        while self.running:
+            try:
+                # Check LD_PRELOAD environment variable in processes
+                for proc in psutil.process_iter(['pid', 'name', 'environ']):
+                    try:
+                        env = proc.info.get('environ') or {}
+                        if 'LD_PRELOAD' in env:
+                            preload_val = env['LD_PRELOAD']
+                            self._send_event(SecurityEvent(
+                                timestamp=datetime.utcnow().isoformat(),
+                                event_type='ld_preload_detected',
+                                severity='CRITICAL',
+                                source='ldpreload',
+                                description=f'LD_PRELOAD detected in process {proc.info["name"]}',
+                                details={'pid': proc.info['pid'], 'name': proc.info['name'], 'ld_preload': preload_val}
+                            ))
+                            logger.warning(f"LD_PRELOAD DETECTED: {proc.info['name']} - {preload_val}")
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+                
+                # Check /etc/ld.so.preload file
+                if os.path.exists(preload_file):
+                    current_hash = self._get_file_hash(preload_file)
+                    if last_hash is None:
+                        # File was created
+                        self._send_event(SecurityEvent(
+                            timestamp=datetime.utcnow().isoformat(),
+                            event_type='ld_preload_file_created',
+                            severity='CRITICAL',
+                            source='ldpreload',
+                            description='ld.so.preload file created - possible rootkit',
+                            details={'path': preload_file}
+                        ))
+                        logger.warning("LD.SO.PRELOAD FILE CREATED!")
+                    elif current_hash != last_hash:
+                        self._send_event(SecurityEvent(
+                            timestamp=datetime.utcnow().isoformat(),
+                            event_type='ld_preload_file_modified',
+                            severity='CRITICAL',
+                            source='ldpreload',
+                            description='ld.so.preload file modified',
+                            details={'path': preload_file}
+                        ))
+                        logger.warning("LD.SO.PRELOAD FILE MODIFIED!")
+                    last_hash = current_hash
+                
+                time.sleep(30)
+            except Exception as e:
+                logger.debug(f"LD_PRELOAD monitor error: {e}")
+                time.sleep(60)
+    
+    def _setuid_monitor_loop(self):
+        """Monitor for new setuid/setgid binaries."""
+        logger.info("Setuid monitor started")
+        
+        # Initial scan of common directories
+        scan_dirs = ['/usr/bin', '/usr/sbin', '/bin', '/sbin', '/usr/local/bin']
+        
+        for scan_dir in scan_dirs:
+            if os.path.exists(scan_dir):
+                for f in os.listdir(scan_dir):
+                    filepath = os.path.join(scan_dir, f)
+                    try:
+                        stat = os.stat(filepath)
+                        if stat.st_mode & 0o4000 or stat.st_mode & 0o2000:  # setuid or setgid
+                            self.known_setuid_binaries[filepath] = stat.st_mode
+                    except (OSError, PermissionError):
+                        continue
+        
+        logger.info(f"Tracking {len(self.known_setuid_binaries)} setuid/setgid binaries")
+        
+        while self.running:
+            try:
+                for scan_dir in scan_dirs:
+                    if not os.path.exists(scan_dir):
+                        continue
+                    
+                    for f in os.listdir(scan_dir):
+                        filepath = os.path.join(scan_dir, f)
+                        try:
+                            stat = os.stat(filepath)
+                            is_setuid = stat.st_mode & 0o4000 or stat.st_mode & 0o2000
+                            
+                            if is_setuid and filepath not in self.known_setuid_binaries:
+                                self._send_event(SecurityEvent(
+                                    timestamp=datetime.utcnow().isoformat(),
+                                    event_type='setuid_binary_added',
+                                    severity='CRITICAL',
+                                    source='setuid',
+                                    description=f'New setuid binary detected: {filepath}',
+                                    details={'path': filepath, 'mode': oct(stat.st_mode)}
+                                ))
+                                logger.warning(f"NEW SETUID BINARY: {filepath}")
+                                self.known_setuid_binaries[filepath] = stat.st_mode
+                        except (OSError, PermissionError):
+                            continue
+                
+                time.sleep(60)
+            except Exception as e:
+                logger.debug(f"Setuid monitor error: {e}")
+                time.sleep(120)
+    
+    def _systemd_monitor_loop(self):
+        """Monitor systemd services for new/modified units."""
+        logger.info("Systemd monitor started")
+        
+        # Get initial service list
+        try:
+            result = subprocess.run(['systemctl', 'list-unit-files', '--type=service', '--no-pager'],
+                                   capture_output=True, text=True)
+            for line in result.stdout.strip().split('\n')[1:]:
+                parts = line.split()
+                if parts and parts[0].endswith('.service'):
+                    self.known_systemd_services.add(parts[0])
+            logger.info(f"Tracking {len(self.known_systemd_services)} systemd services")
+        except Exception as e:
+            logger.warning(f"Could not get initial service list: {e}")
+        
+        while self.running:
+            try:
+                result = subprocess.run(['systemctl', 'list-unit-files', '--type=service', '--no-pager'],
+                                       capture_output=True, text=True)
+                
+                for line in result.stdout.strip().split('\n')[1:]:
+                    parts = line.split()
+                    if parts and parts[0].endswith('.service'):
+                        service = parts[0]
+                        if service not in self.known_systemd_services:
+                            self._send_event(SecurityEvent(
+                                timestamp=datetime.utcnow().isoformat(),
+                                event_type='systemd_service_added',
+                                severity='HIGH',
+                                source='systemd',
+                                description=f'New systemd service detected: {service}',
+                                details={'service': service, 'state': parts[1] if len(parts) > 1 else 'unknown'}
+                            ))
+                            logger.warning(f"NEW SYSTEMD SERVICE: {service}")
+                            self.known_systemd_services.add(service)
+                
+                time.sleep(60)
+            except Exception as e:
+                logger.debug(f"Systemd monitor error: {e}")
+                time.sleep(120)
+    
+    def _package_monitor_loop(self):
+        """Monitor for unauthorized package installations."""
+        logger.info("Package monitor started")
+        
+        # Detect package manager
+        pkg_cmd = None
+        if os.path.exists('/usr/bin/dpkg'):
+            pkg_cmd = ['dpkg', '-l']
+        elif os.path.exists('/usr/bin/rpm'):
+            pkg_cmd = ['rpm', '-qa']
+        elif os.path.exists('/usr/bin/pacman'):
+            pkg_cmd = ['pacman', '-Q']
+        
+        if not pkg_cmd:
+            logger.warning("No supported package manager found")
+            return
+        
+        # Get initial package list
+        try:
+            result = subprocess.run(pkg_cmd, capture_output=True, text=True)
+            for line in result.stdout.strip().split('\n'):
+                parts = line.split()
+                if parts:
+                    self.known_packages.add(parts[0] if pkg_cmd[0] != 'dpkg' else parts[1] if len(parts) > 1 else parts[0])
+            logger.info(f"Tracking {len(self.known_packages)} packages")
+        except Exception as e:
+            logger.warning(f"Could not get initial package list: {e}")
+        
+        while self.running:
+            try:
+                result = subprocess.run(pkg_cmd, capture_output=True, text=True)
+                current_packages = set()
+                
+                for line in result.stdout.strip().split('\n'):
+                    parts = line.split()
+                    if parts:
+                        pkg = parts[0] if pkg_cmd[0] != 'dpkg' else parts[1] if len(parts) > 1 else parts[0]
+                        current_packages.add(pkg)
+                        
+                        if pkg not in self.known_packages:
+                            self._send_event(SecurityEvent(
+                                timestamp=datetime.utcnow().isoformat(),
+                                event_type='package_installed',
+                                severity='MEDIUM',
+                                source='packages',
+                                description=f'New package installed: {pkg}',
+                                details={'package': pkg}
+                            ))
+                            logger.warning(f"NEW PACKAGE: {pkg}")
+                            self.known_packages.add(pkg)
+                
+                time.sleep(300)  # Check every 5 minutes
+            except Exception as e:
+                logger.debug(f"Package monitor error: {e}")
+                time.sleep(600)
+    
+    def _file_integrity_monitor_loop(self):
+        """Monitor critical system files for modifications."""
+        logger.info("File integrity monitor started")
+        
+        # Initial hash of critical files
+        for filepath in self.critical_files:
+            if os.path.exists(filepath):
+                self.file_integrity_hashes[filepath] = self._get_file_hash(filepath) or ''
+        
+        logger.info(f"Monitoring {len(self.file_integrity_hashes)} critical files")
+        
+        while self.running:
+            try:
+                for filepath in self.critical_files:
+                    if os.path.exists(filepath):
+                        current_hash = self._get_file_hash(filepath)
+                        
+                        if filepath not in self.file_integrity_hashes:
+                            self._send_event(SecurityEvent(
+                                timestamp=datetime.utcnow().isoformat(),
+                                event_type='critical_file_created',
+                                severity='CRITICAL',
+                                source='integrity',
+                                description=f'Critical file created: {filepath}',
+                                details={'path': filepath}
+                            ))
+                            logger.warning(f"CRITICAL FILE CREATED: {filepath}")
+                        elif current_hash != self.file_integrity_hashes[filepath]:
+                            self._send_event(SecurityEvent(
+                                timestamp=datetime.utcnow().isoformat(),
+                                event_type='critical_file_modified',
+                                severity='CRITICAL',
+                                source='integrity',
+                                description=f'Critical file modified: {filepath}',
+                                details={'path': filepath, 'old_hash': self.file_integrity_hashes[filepath][:16], 'new_hash': current_hash[:16] if current_hash else 'unknown'}
+                            ))
+                            logger.warning(f"CRITICAL FILE MODIFIED: {filepath}")
+                        
+                        self.file_integrity_hashes[filepath] = current_hash or ''
+                
+                time.sleep(60)
+            except Exception as e:
+                logger.debug(f"File integrity monitor error: {e}")
+                time.sleep(120)
+    
+    def _container_escape_monitor_loop(self):
+        """Monitor for container escape attempts."""
+        logger.info("Container escape monitor started")
+        
+        # Check if we're in a container
+        in_container = os.path.exists('/.dockerenv') or os.path.exists('/run/.containerenv')
+        
+        escape_indicators = [
+            '/proc/1/root',  # Accessing host root
+            '/proc/sys/kernel/core_pattern',  # Core pattern escape
+            '/sys/kernel/uevent_helper',  # Uevent helper escape
+            '/sys/fs/cgroup',  # Cgroup escape
+        ]
+        
+        while self.running:
+            try:
+                # Monitor for suspicious mount operations
+                result = subprocess.run(['mount'], capture_output=True, text=True)
+                for line in result.stdout.split('\n'):
+                    if 'docker.sock' in line or '/var/run/docker.sock' in line:
+                        self._send_event(SecurityEvent(
+                            timestamp=datetime.utcnow().isoformat(),
+                            event_type='container_escape_attempt',
+                            severity='CRITICAL',
+                            source='container',
+                            description='Docker socket mounted - potential escape vector',
+                            details={'mount_line': line}
+                        ))
+                        logger.warning("DOCKER SOCKET MOUNTED - ESCAPE RISK!")
+                
+                # Check for processes accessing escape indicators
+                for proc in psutil.process_iter(['pid', 'name', 'open_files']):
+                    try:
+                        open_files = proc.info.get('open_files') or []
+                        for f in open_files:
+                            if any(indicator in f.path for indicator in escape_indicators):
+                                self._send_event(SecurityEvent(
+                                    timestamp=datetime.utcnow().isoformat(),
+                                    event_type='container_escape_attempt',
+                                    severity='CRITICAL',
+                                    source='container',
+                                    description=f'Process accessing escape vector: {f.path}',
+                                    details={'pid': proc.info['pid'], 'name': proc.info['name'], 'path': f.path}
+                                ))
+                                logger.warning(f"CONTAINER ESCAPE ATTEMPT: {proc.info['name']} -> {f.path}")
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+                
+                time.sleep(30)
+            except Exception as e:
+                logger.debug(f"Container escape monitor error: {e}")
+                time.sleep(60)
+    
+    def _auditd_monitor_loop(self):
+        """Monitor auditd logs for security events."""
+        logger.info("Auditd monitor started")
+        
+        audit_log = '/var/log/audit/audit.log'
+        if not os.path.exists(audit_log):
+            logger.warning("Auditd log not found - auditd may not be installed")
+            return
+        
+        try:
+            with open(audit_log, 'r') as f:
+                f.seek(0, 2)  # Go to end
+                
+                while self.running:
+                    line = f.readline()
+                    if not line:
+                        time.sleep(1)
+                        continue
+                    
+                    # Parse audit events
+                    if 'type=EXECVE' in line or 'type=SYSCALL' in line:
+                        # Check for suspicious syscalls
+                        if any(x in line for x in ['execve', 'ptrace', 'process_vm_readv', 'process_vm_writev']):
+                            if 'success=yes' in line:
+                                self._send_event(SecurityEvent(
+                                    timestamp=datetime.utcnow().isoformat(),
+                                    event_type='audit_suspicious_syscall',
+                                    severity='MEDIUM',
+                                    source='auditd',
+                                    description='Suspicious syscall detected',
+                                    details={'log_line': line.strip()[:500]}
+                                ))
+                    
+                    # Check for privilege escalation
+                    if 'type=USER_AUTH' in line and 'res=failed' in line:
+                        self._send_event(SecurityEvent(
+                            timestamp=datetime.utcnow().isoformat(),
+                            event_type='audit_auth_failure',
+                            severity='MEDIUM',
+                            source='auditd',
+                            description='Authentication failure in audit log',
+                            details={'log_line': line.strip()[:500]}
+                        ))
+                        
+        except PermissionError:
+            logger.warning("Permission denied reading audit log. Run as root.")
+        except Exception as e:
+            logger.error(f"Auditd monitor error: {e}")
+    
+    def _selinux_monitor_loop(self):
+        """Monitor SELinux/AppArmor for policy violations."""
+        logger.info("SELinux/AppArmor monitor started")
+        
+        # Check which MAC system is in use
+        selinux_log = '/var/log/audit/audit.log'
+        apparmor_log = '/var/log/kern.log'
+        
+        log_file = None
+        mac_type = None
+        
+        if os.path.exists('/sys/fs/selinux'):
+            log_file = selinux_log
+            mac_type = 'SELinux'
+        elif os.path.exists('/sys/kernel/security/apparmor'):
+            log_file = apparmor_log
+            mac_type = 'AppArmor'
+        else:
+            logger.warning("No SELinux or AppArmor detected")
+            return
+        
+        if not os.path.exists(log_file):
+            logger.warning(f"{mac_type} log not found: {log_file}")
+            return
+        
+        try:
+            with open(log_file, 'r') as f:
+                f.seek(0, 2)  # Go to end
+                
+                while self.running:
+                    line = f.readline()
+                    if not line:
+                        time.sleep(1)
+                        continue
+                    
+                    # SELinux denials
+                    if 'avc:  denied' in line or 'type=AVC' in line:
+                        self._send_event(SecurityEvent(
+                            timestamp=datetime.utcnow().isoformat(),
+                            event_type='selinux_denial',
+                            severity='MEDIUM',
+                            source='selinux',
+                            description='SELinux policy violation',
+                            details={'log_line': line.strip()[:500]}
+                        ))
+                        logger.warning(f"SELINUX DENIAL: {line.strip()[:100]}")
+                    
+                    # AppArmor denials
+                    if 'apparmor="DENIED"' in line:
+                        self._send_event(SecurityEvent(
+                            timestamp=datetime.utcnow().isoformat(),
+                            event_type='apparmor_denial',
+                            severity='MEDIUM',
+                            source='apparmor',
+                            description='AppArmor policy violation',
+                            details={'log_line': line.strip()[:500]}
+                        ))
+                        logger.warning(f"APPARMOR DENIAL: {line.strip()[:100]}")
+                        
+        except PermissionError:
+            logger.warning(f"Permission denied reading {mac_type} log. Run as root.")
+        except Exception as e:
+            logger.error(f"{mac_type} monitor error: {e}")
 
 
 def main():
@@ -432,6 +1113,8 @@ def main():
     parser = argparse.ArgumentParser(description='SentinelAI Linux/macOS Agent')
     parser.add_argument('--dashboard', '-d', default='http://localhost:8015',
                         help='Dashboard URL (default: http://localhost:8015)')
+    parser.add_argument('--api-key', '-k', default=None,
+                        help='API key for dashboard authentication')
     parser.add_argument('--verbose', '-v', action='store_true',
                         help='Enable verbose logging')
     parser.add_argument('--no-ai', action='store_true',
@@ -443,17 +1126,24 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
     
     ai_status = "DISABLED" if args.no_ai else "ENABLED"
+    api_key = args.api_key or os.environ.get('SENTINEL_API_KEY', '')
+    plat = platform.system()
     
     print(f"""
-    ╔═══════════════════════════════════════════════════════════╗
-    ║         SentinelAI Linux/macOS Agent v1.0                 ║
-    ║       Native Unix Protection & Threat Detection           ║
-    ║                                                           ║
-    ║     AI Analysis: {ai_status:^10}                            ║
-    ╚═══════════════════════════════════════════════════════════╝
+    ╔═══════════════════════════════════════════════════════════════════╗
+    ║              SentinelAI Linux/macOS Agent v2.0                    ║
+    ║          Native Unix Protection & Threat Detection                ║
+    ║                                                                   ║
+    ║  Core:     Process | Network | AuthLog | Firewall                 ║
+    ║  System:   Cron | SSH Keys | Sudo | Systemd | Packages            ║
+    ║  Security: Kernel Modules | LD_PRELOAD | Setuid | Integrity       ║
+    ║  Advanced: Container Escape | Auditd | SELinux/AppArmor           ║
+    ║                                                                   ║
+    ║     Platform: {plat:<10}  |  AI Analysis: {ai_status:<10}           ║
+    ╚═══════════════════════════════════════════════════════════════════╝
     """)
     
-    agent = LinuxAgent(dashboard_url=args.dashboard)
+    agent = LinuxAgent(dashboard_url=args.dashboard, api_key=api_key)
     agent.use_ai = not args.no_ai
     agent.start()
 
