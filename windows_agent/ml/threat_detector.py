@@ -155,8 +155,11 @@ class AdvancedThreatDetector:
         # Update behavioral event with threat score
         behav_event.threat_score = final_confidence
         
+        # Final threat decision: require confidence > 0.5 for threat
+        final_is_threat = (is_threat and confidence > 0.5) or final_confidence > 0.6
+        
         return ThreatPrediction(
-            is_threat=is_threat or final_confidence > 0.6,
+            is_threat=final_is_threat,
             confidence=final_confidence,
             threat_type=threat_type,
             severity=severity,

@@ -1009,11 +1009,49 @@ class WindowsAgent:
                 # Get event with timeout
                 event = self.event_queue.get(timeout=1)
                 
-                # Step 1: Use hybrid detector (rules + local ML) - FREE and FAST
+                # Step 1: Use Advanced ML v2.0 if available (150+ features, behavioral, anomaly)
                 should_use_openai = False
                 local_analysis = None
+                advanced_analysis = None
                 
-                if self.hybrid_detector:
+                if self.advanced_detector:
+                    try:
+                        prediction = self.advanced_detector.analyze(event.details, event.event_type)
+                        
+                        advanced_analysis = {
+                            'method': 'advanced_ml_v2',
+                            'is_threat': prediction.is_threat,
+                            'confidence': prediction.confidence,
+                            'threat_type': prediction.threat_type,
+                            'severity': prediction.severity,
+                            'reason': prediction.reason,
+                            'mitre_techniques': prediction.mitre_techniques,
+                            'anomaly_score': prediction.anomaly_score,
+                            'behavioral_score': prediction.behavioral_score,
+                            'attack_chains': prediction.attack_chains[:2] if prediction.attack_chains else [],
+                            'model_scores': prediction.model_scores,
+                        }
+                        
+                        # Use Advanced ML result
+                        local_analysis = advanced_analysis
+                        should_use_openai = prediction.needs_ai_review
+                        
+                        # Update event severity based on ML prediction
+                        if prediction.is_threat and prediction.confidence > 0.6:
+                            if prediction.severity in ['CRITICAL', 'HIGH']:
+                                event.severity = prediction.severity
+                        elif not prediction.is_threat and prediction.confidence > 0.7:
+                            if event.severity in ['HIGH', 'CRITICAL']:
+                                event.severity = 'LOW'
+                                logger.debug(f"Advanced ML marked safe: {event.event_type}")
+                        
+                        event.details['advanced_ml_analysis'] = advanced_analysis
+                        
+                    except Exception as e:
+                        logger.debug(f"Advanced ML error: {e}")
+                
+                # Step 1b: Fallback to legacy hybrid detector if Advanced ML not available
+                if not local_analysis and self.hybrid_detector:
                     score, should_use_openai = self.hybrid_detector.analyze(
                         event.event_type, 
                         event.details

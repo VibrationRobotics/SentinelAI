@@ -15,18 +15,58 @@ class SyntheticDataGenerator:
     def __init__(self):
         self.extractor = AdvancedFeatureExtractor()
         
-        # Benign process patterns
+        # Benign process patterns - expanded for better training
         self.benign_processes = [
+            # Browsers (many variations)
             {'name': 'chrome.exe', 'exe': 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'cmdline': 'chrome.exe --type=renderer'},
+            {'name': 'chrome.exe', 'exe': 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'cmdline': 'chrome.exe --type=gpu-process'},
+            {'name': 'chrome.exe', 'exe': 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'cmdline': 'chrome.exe --type=utility'},
+            {'name': 'chrome.exe', 'exe': 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe', 'cmdline': 'chrome.exe'},
+            {'name': 'firefox.exe', 'exe': 'C:\\Program Files\\Mozilla Firefox\\firefox.exe', 'cmdline': 'firefox.exe'},
+            {'name': 'firefox.exe', 'exe': 'C:\\Program Files\\Mozilla Firefox\\firefox.exe', 'cmdline': 'firefox.exe -contentproc'},
+            {'name': 'msedge.exe', 'exe': 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', 'cmdline': 'msedge.exe'},
+            {'name': 'brave.exe', 'exe': 'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe', 'cmdline': 'brave.exe'},
+            # System processes
             {'name': 'explorer.exe', 'exe': 'C:\\Windows\\explorer.exe', 'cmdline': 'C:\\Windows\\explorer.exe'},
             {'name': 'svchost.exe', 'exe': 'C:\\Windows\\System32\\svchost.exe', 'cmdline': 'svchost.exe -k netsvcs'},
+            {'name': 'svchost.exe', 'exe': 'C:\\Windows\\System32\\svchost.exe', 'cmdline': 'svchost.exe -k LocalService'},
+            {'name': 'svchost.exe', 'exe': 'C:\\Windows\\System32\\svchost.exe', 'cmdline': 'svchost.exe -k NetworkService'},
+            {'name': 'csrss.exe', 'exe': 'C:\\Windows\\System32\\csrss.exe', 'cmdline': 'csrss.exe'},
+            {'name': 'lsass.exe', 'exe': 'C:\\Windows\\System32\\lsass.exe', 'cmdline': 'lsass.exe'},
+            {'name': 'services.exe', 'exe': 'C:\\Windows\\System32\\services.exe', 'cmdline': 'services.exe'},
+            {'name': 'dwm.exe', 'exe': 'C:\\Windows\\System32\\dwm.exe', 'cmdline': 'dwm.exe'},
+            {'name': 'taskhostw.exe', 'exe': 'C:\\Windows\\System32\\taskhostw.exe', 'cmdline': 'taskhostw.exe'},
+            {'name': 'RuntimeBroker.exe', 'exe': 'C:\\Windows\\System32\\RuntimeBroker.exe', 'cmdline': 'RuntimeBroker.exe'},
+            # Office apps
             {'name': 'notepad.exe', 'exe': 'C:\\Windows\\System32\\notepad.exe', 'cmdline': 'notepad.exe document.txt'},
-            {'name': 'code.exe', 'exe': 'C:\\Users\\User\\AppData\\Local\\Programs\\VS Code\\Code.exe', 'cmdline': 'code.exe .'},
+            {'name': 'notepad.exe', 'exe': 'C:\\Windows\\System32\\notepad.exe', 'cmdline': 'notepad.exe'},
+            {'name': 'outlook.exe', 'exe': 'C:\\Program Files\\Microsoft Office\\root\\Office16\\OUTLOOK.EXE', 'cmdline': 'outlook.exe'},
+            {'name': 'winword.exe', 'exe': 'C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE', 'cmdline': 'winword.exe'},
+            {'name': 'excel.exe', 'exe': 'C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE', 'cmdline': 'excel.exe'},
+            # Development tools
+            {'name': 'code.exe', 'exe': 'C:\\Users\\User\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe', 'cmdline': 'code.exe .'},
+            {'name': 'code.exe', 'exe': 'C:\\Program Files\\Microsoft VS Code\\Code.exe', 'cmdline': 'code.exe'},
             {'name': 'python.exe', 'exe': 'C:\\Python311\\python.exe', 'cmdline': 'python.exe script.py'},
-            {'name': 'outlook.exe', 'exe': 'C:\\Program Files\\Microsoft Office\\OUTLOOK.EXE', 'cmdline': 'outlook.exe'},
-            {'name': 'teams.exe', 'exe': 'C:\\Users\\User\\AppData\\Local\\Microsoft\\Teams\\Teams.exe', 'cmdline': 'teams.exe'},
+            {'name': 'python.exe', 'exe': 'C:\\Users\\User\\AppData\\Local\\Programs\\Python\\Python311\\python.exe', 'cmdline': 'python.exe'},
+            {'name': 'node.exe', 'exe': 'C:\\Program Files\\nodejs\\node.exe', 'cmdline': 'node.exe app.js'},
+            {'name': 'git.exe', 'exe': 'C:\\Program Files\\Git\\cmd\\git.exe', 'cmdline': 'git.exe status'},
+            # Communication apps
+            {'name': 'teams.exe', 'exe': 'C:\\Users\\User\\AppData\\Local\\Microsoft\\Teams\\current\\Teams.exe', 'cmdline': 'teams.exe'},
             {'name': 'slack.exe', 'exe': 'C:\\Users\\User\\AppData\\Local\\slack\\slack.exe', 'cmdline': 'slack.exe'},
-            {'name': 'firefox.exe', 'exe': 'C:\\Program Files\\Mozilla Firefox\\firefox.exe', 'cmdline': 'firefox.exe'},
+            {'name': 'discord.exe', 'exe': 'C:\\Users\\User\\AppData\\Local\\Discord\\app-1.0.9013\\Discord.exe', 'cmdline': 'discord.exe'},
+            {'name': 'zoom.exe', 'exe': 'C:\\Users\\User\\AppData\\Roaming\\Zoom\\bin\\Zoom.exe', 'cmdline': 'zoom.exe'},
+            # Media/Entertainment
+            {'name': 'spotify.exe', 'exe': 'C:\\Users\\User\\AppData\\Roaming\\Spotify\\Spotify.exe', 'cmdline': 'spotify.exe'},
+            {'name': 'steam.exe', 'exe': 'C:\\Program Files (x86)\\Steam\\steam.exe', 'cmdline': 'steam.exe'},
+            # Security software (should not be flagged!)
+            {'name': 'MsMpEng.exe', 'exe': 'C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\MsMpEng.exe', 'cmdline': 'MsMpEng.exe'},
+            {'name': 'avgui.exe', 'exe': 'C:\\Program Files\\AVG\\Antivirus\\avgui.exe', 'cmdline': 'avgui.exe'},
+            # Normal PowerShell usage (not encoded, not hidden)
+            {'name': 'powershell.exe', 'exe': 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', 'cmdline': 'powershell.exe Get-Process'},
+            {'name': 'powershell.exe', 'exe': 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', 'cmdline': 'powershell.exe -File script.ps1'},
+            # Normal CMD usage
+            {'name': 'cmd.exe', 'exe': 'C:\\Windows\\System32\\cmd.exe', 'cmdline': 'cmd.exe /c dir'},
+            {'name': 'cmd.exe', 'exe': 'C:\\Windows\\System32\\cmd.exe', 'cmdline': 'cmd.exe'},
         ]
         
         # Malicious process patterns
