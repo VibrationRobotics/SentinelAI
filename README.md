@@ -99,6 +99,15 @@ SentinelAI is an intelligent cybersecurity system that provides **real-time thre
 | **User Feedback** | Correct false positives to improve accuracy |
 | **Auto-Retrain** | Background retraining every 24h with 500+ samples |
 
+#### ML Benchmark Results
+| Metric | Score |
+|--------|-------|
+| **Accuracy** | 96.5% |
+| **Precision** | 99.7% |
+| **Recall** | 89.9% |
+| **F1 Score** | 94.5% |
+| **False Positive Rate** | 0.2% |
+
 ### Desktop Application (Coming Soon)
 | Feature | Description |
 |---------|-------------|

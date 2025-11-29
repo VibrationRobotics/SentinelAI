@@ -142,6 +142,19 @@ windows_agent/ml/models/
 └── online_training_data.pkl # Collected training samples
 ```
 
+### Benchmark Results
+Run `python benchmark_ml.py` to test the model:
+
+| Metric | Score |
+|--------|-------|
+| **Accuracy** | 96.5% |
+| **Precision** | 99.7% (when we say threat, we're right) |
+| **Recall** | 89.9% (catches 90% of threats) |
+| **F1 Score** | 94.5% |
+| **False Positive Rate** | 0.2% (almost no false alarms) |
+
+Trained on 5,000 synthetic samples (67% benign, 33% malicious).
+
 ## What It Monitors
 
 ### Suspicious Processes
