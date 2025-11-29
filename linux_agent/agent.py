@@ -190,6 +190,17 @@ class LinuxAgent:
                 threading.Thread(target=self._selinux_monitor_loop, daemon=True, name='selinux'),
             ])
         
+        # Advanced monitors (macOS-specific)
+        if self.platform == 'Darwin':
+            threads.extend([
+                threading.Thread(target=self._launch_daemon_monitor_loop, daemon=True, name='launchdaemon'),
+                threading.Thread(target=self._keychain_monitor_loop, daemon=True, name='keychain'),
+                threading.Thread(target=self._gatekeeper_monitor_loop, daemon=True, name='gatekeeper'),
+                threading.Thread(target=self._tcc_monitor_loop, daemon=True, name='tcc'),
+                threading.Thread(target=self._unified_log_monitor_loop, daemon=True, name='unifiedlog'),
+                threading.Thread(target=self._xprotect_monitor_loop, daemon=True, name='xprotect'),
+            ])
+        
         for t in threads:
             t.start()
             logger.info(f"{t.name} monitor started")
@@ -230,6 +241,11 @@ class LinuxAgent:
                     'cron', 'sshkeys', 'kernel', 'ldpreload', 'setuid',
                     'systemd', 'packages', 'integrity', 'container',
                     'auditd', 'selinux'
+                ])
+            elif self.platform == 'Darwin':
+                capabilities.extend([
+                    'launchdaemon', 'keychain', 'gatekeeper', 'tcc',
+                    'unifiedlog', 'xprotect'
                 ])
             
             data = {
@@ -1106,6 +1122,330 @@ class LinuxAgent:
             logger.warning(f"Permission denied reading {mac_type} log. Run as root.")
         except Exception as e:
             logger.error(f"{mac_type} monitor error: {e}")
+    
+    # ============== macOS-SPECIFIC MONITORS ==============
+    
+    def _launch_daemon_monitor_loop(self):
+        """Monitor Launch Daemons and Agents for persistence (macOS)."""
+        logger.info("Launch Daemon monitor started")
+        
+        launch_paths = [
+            '/Library/LaunchDaemons',
+            '/Library/LaunchAgents',
+            os.path.expanduser('~/Library/LaunchAgents'),
+            '/System/Library/LaunchDaemons',
+            '/System/Library/LaunchAgents',
+        ]
+        
+        known_items: Dict[str, str] = {}
+        
+        # Initial scan
+        for path in launch_paths:
+            if os.path.exists(path):
+                for item in os.listdir(path):
+                    filepath = os.path.join(path, item)
+                    if os.path.isfile(filepath):
+                        known_items[filepath] = self._get_file_hash(filepath) or ''
+        
+        logger.info(f"Tracking {len(known_items)} launch items")
+        
+        while self.running:
+            try:
+                for path in launch_paths:
+                    if not os.path.exists(path):
+                        continue
+                    
+                    for item in os.listdir(path):
+                        filepath = os.path.join(path, item)
+                        if not os.path.isfile(filepath):
+                            continue
+                        
+                        current_hash = self._get_file_hash(filepath)
+                        
+                        if filepath not in known_items:
+                            self._send_event(SecurityEvent(
+                                timestamp=datetime.utcnow().isoformat(),
+                                event_type='launch_daemon_added',
+                                severity='HIGH',
+                                source='launchdaemon',
+                                description=f'New Launch Daemon/Agent: {item}',
+                                details={'path': filepath, 'directory': path}
+                            ))
+                            logger.warning(f"NEW LAUNCH DAEMON: {filepath}")
+                        elif current_hash != known_items[filepath]:
+                            self._send_event(SecurityEvent(
+                                timestamp=datetime.utcnow().isoformat(),
+                                event_type='launch_daemon_modified',
+                                severity='HIGH',
+                                source='launchdaemon',
+                                description=f'Launch Daemon/Agent modified: {item}',
+                                details={'path': filepath}
+                            ))
+                            logger.warning(f"LAUNCH DAEMON MODIFIED: {filepath}")
+                        
+                        known_items[filepath] = current_hash
+                
+                time.sleep(30)
+            except Exception as e:
+                logger.debug(f"Launch Daemon monitor error: {e}")
+                time.sleep(60)
+    
+    def _keychain_monitor_loop(self):
+        """Monitor Keychain access attempts (macOS)."""
+        logger.info("Keychain monitor started")
+        
+        # Use unified log to monitor keychain access
+        try:
+            # Start log stream for security events
+            cmd = ['log', 'stream', '--predicate', 
+                   'subsystem == "com.apple.securityd" OR subsystem == "com.apple.Security"',
+                   '--style', 'compact']
+            
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+                                   text=True, bufsize=1)
+            
+            while self.running:
+                line = proc.stdout.readline()
+                if not line:
+                    time.sleep(0.1)
+                    continue
+                
+                # Check for suspicious keychain access
+                if any(x in line.lower() for x in ['denied', 'unauthorized', 'failed', 'blocked']):
+                    self._send_event(SecurityEvent(
+                        timestamp=datetime.utcnow().isoformat(),
+                        event_type='keychain_access_denied',
+                        severity='MEDIUM',
+                        source='keychain',
+                        description='Keychain access denied',
+                        details={'log_line': line.strip()[:500]}
+                    ))
+                    logger.warning(f"KEYCHAIN ACCESS DENIED: {line.strip()[:100]}")
+                
+                # Check for password extraction attempts
+                if 'SecItemCopyMatching' in line or 'SecKeychainFindGenericPassword' in line:
+                    self._send_event(SecurityEvent(
+                        timestamp=datetime.utcnow().isoformat(),
+                        event_type='keychain_password_access',
+                        severity='LOW',
+                        source='keychain',
+                        description='Keychain password access',
+                        details={'log_line': line.strip()[:500]}
+                    ))
+            
+            proc.terminate()
+        except FileNotFoundError:
+            logger.warning("log command not found - Keychain monitoring unavailable")
+        except Exception as e:
+            logger.debug(f"Keychain monitor error: {e}")
+    
+    def _gatekeeper_monitor_loop(self):
+        """Monitor Gatekeeper bypass attempts (macOS)."""
+        logger.info("Gatekeeper monitor started")
+        
+        # Monitor for unsigned/quarantined app execution
+        try:
+            cmd = ['log', 'stream', '--predicate',
+                   'subsystem == "com.apple.syspolicy" OR eventMessage CONTAINS "Gatekeeper"',
+                   '--style', 'compact']
+            
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   text=True, bufsize=1)
+            
+            while self.running:
+                line = proc.stdout.readline()
+                if not line:
+                    time.sleep(0.1)
+                    continue
+                
+                # Check for Gatekeeper blocks
+                if any(x in line.lower() for x in ['blocked', 'quarantine', 'notarization', 'denied']):
+                    severity = 'HIGH' if 'blocked' in line.lower() else 'MEDIUM'
+                    self._send_event(SecurityEvent(
+                        timestamp=datetime.utcnow().isoformat(),
+                        event_type='gatekeeper_block',
+                        severity=severity,
+                        source='gatekeeper',
+                        description='Gatekeeper blocked unsigned app',
+                        details={'log_line': line.strip()[:500]}
+                    ))
+                    logger.warning(f"GATEKEEPER BLOCK: {line.strip()[:100]}")
+                
+                # Check for xattr removal (bypass attempt)
+                if 'xattr' in line.lower() and 'quarantine' in line.lower():
+                    self._send_event(SecurityEvent(
+                        timestamp=datetime.utcnow().isoformat(),
+                        event_type='gatekeeper_bypass_attempt',
+                        severity='HIGH',
+                        source='gatekeeper',
+                        description='Possible Gatekeeper bypass (quarantine removal)',
+                        details={'log_line': line.strip()[:500]}
+                    ))
+                    logger.warning(f"GATEKEEPER BYPASS ATTEMPT: {line.strip()[:100]}")
+            
+            proc.terminate()
+        except FileNotFoundError:
+            logger.warning("log command not found - Gatekeeper monitoring unavailable")
+        except Exception as e:
+            logger.debug(f"Gatekeeper monitor error: {e}")
+    
+    def _tcc_monitor_loop(self):
+        """Monitor TCC (Transparency, Consent, Control) database changes (macOS)."""
+        logger.info("TCC monitor started")
+        
+        # TCC database locations
+        tcc_paths = [
+            '/Library/Application Support/com.apple.TCC/TCC.db',
+            os.path.expanduser('~/Library/Application Support/com.apple.TCC/TCC.db'),
+        ]
+        
+        last_hashes: Dict[str, str] = {}
+        
+        # Get initial hashes
+        for path in tcc_paths:
+            if os.path.exists(path):
+                last_hashes[path] = self._get_file_hash(path) or ''
+        
+        while self.running:
+            try:
+                for path in tcc_paths:
+                    if os.path.exists(path):
+                        current_hash = self._get_file_hash(path)
+                        
+                        if path in last_hashes and current_hash != last_hashes[path]:
+                            self._send_event(SecurityEvent(
+                                timestamp=datetime.utcnow().isoformat(),
+                                event_type='tcc_database_modified',
+                                severity='MEDIUM',
+                                source='tcc',
+                                description='TCC privacy database modified',
+                                details={'path': path}
+                            ))
+                            logger.warning(f"TCC DATABASE MODIFIED: {path}")
+                        
+                        last_hashes[path] = current_hash
+                
+                time.sleep(30)
+            except Exception as e:
+                logger.debug(f"TCC monitor error: {e}")
+                time.sleep(60)
+    
+    def _unified_log_monitor_loop(self):
+        """Monitor macOS Unified Log for security events."""
+        logger.info("Unified Log monitor started")
+        
+        # Security-related predicates
+        predicates = [
+            'eventMessage CONTAINS "sudo"',
+            'eventMessage CONTAINS "authentication"',
+            'eventMessage CONTAINS "failed"',
+            'subsystem == "com.apple.securityd"',
+        ]
+        
+        try:
+            cmd = ['log', 'stream', '--predicate',
+                   ' OR '.join(predicates),
+                   '--style', 'compact']
+            
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   text=True, bufsize=1)
+            
+            while self.running:
+                line = proc.stdout.readline()
+                if not line:
+                    time.sleep(0.1)
+                    continue
+                
+                # Check for sudo usage
+                if 'sudo' in line.lower():
+                    if 'incorrect password' in line.lower() or 'authentication failure' in line.lower():
+                        self._send_event(SecurityEvent(
+                            timestamp=datetime.utcnow().isoformat(),
+                            event_type='sudo_auth_failure',
+                            severity='MEDIUM',
+                            source='unifiedlog',
+                            description='Sudo authentication failure',
+                            details={'log_line': line.strip()[:500]}
+                        ))
+                        logger.warning(f"SUDO AUTH FAILURE: {line.strip()[:100]}")
+                
+                # Check for authentication failures
+                if 'authentication' in line.lower() and 'failed' in line.lower():
+                    self._send_event(SecurityEvent(
+                        timestamp=datetime.utcnow().isoformat(),
+                        event_type='auth_failure',
+                        severity='MEDIUM',
+                        source='unifiedlog',
+                        description='Authentication failure detected',
+                        details={'log_line': line.strip()[:500]}
+                    ))
+            
+            proc.terminate()
+        except FileNotFoundError:
+            logger.warning("log command not found - Unified Log monitoring unavailable")
+        except Exception as e:
+            logger.debug(f"Unified Log monitor error: {e}")
+    
+    def _xprotect_monitor_loop(self):
+        """Monitor XProtect (Apple's built-in malware detection) events (macOS)."""
+        logger.info("XProtect monitor started")
+        
+        # XProtect data locations
+        xprotect_paths = [
+            '/Library/Apple/System/Library/CoreServices/XProtect.bundle',
+            '/System/Library/CoreServices/XProtect.bundle',
+        ]
+        
+        last_hashes: Dict[str, str] = {}
+        
+        # Get initial state
+        for base_path in xprotect_paths:
+            if os.path.exists(base_path):
+                plist_path = os.path.join(base_path, 'Contents/Resources/XProtect.plist')
+                if os.path.exists(plist_path):
+                    last_hashes[plist_path] = self._get_file_hash(plist_path) or ''
+        
+        # Also monitor unified log for XProtect events
+        try:
+            cmd = ['log', 'stream', '--predicate',
+                   'subsystem == "com.apple.xprotect" OR eventMessage CONTAINS "XProtect"',
+                   '--style', 'compact']
+            
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   text=True, bufsize=1)
+            
+            while self.running:
+                line = proc.stdout.readline()
+                if not line:
+                    # Check for XProtect definition updates
+                    for base_path in xprotect_paths:
+                        plist_path = os.path.join(base_path, 'Contents/Resources/XProtect.plist')
+                        if os.path.exists(plist_path):
+                            current_hash = self._get_file_hash(plist_path)
+                            if plist_path in last_hashes and current_hash != last_hashes[plist_path]:
+                                logger.info("XProtect definitions updated")
+                                last_hashes[plist_path] = current_hash
+                    
+                    time.sleep(0.1)
+                    continue
+                
+                # Check for malware detection
+                if any(x in line.lower() for x in ['malware', 'threat', 'blocked', 'quarantine']):
+                    self._send_event(SecurityEvent(
+                        timestamp=datetime.utcnow().isoformat(),
+                        event_type='xprotect_detection',
+                        severity='CRITICAL',
+                        source='xprotect',
+                        description='XProtect malware detection',
+                        details={'log_line': line.strip()[:500]}
+                    ))
+                    logger.warning(f"XPROTECT DETECTION: {line.strip()[:100]}")
+            
+            proc.terminate()
+        except FileNotFoundError:
+            logger.warning("log command not found - XProtect monitoring unavailable")
+        except Exception as e:
+            logger.debug(f"XProtect monitor error: {e}")
 
 
 def main():
@@ -1129,12 +1469,26 @@ def main():
     api_key = args.api_key or os.environ.get('SENTINEL_API_KEY', '')
     plat = platform.system()
     
-    print(f"""
+    if plat == 'Darwin':
+        print(f"""
     ╔═══════════════════════════════════════════════════════════════════╗
-    ║              SentinelAI Linux/macOS Agent v2.0                    ║
-    ║          Native Unix Protection & Threat Detection                ║
+    ║              SentinelAI macOS Agent v2.0                          ║
+    ║          Native macOS Protection & Threat Detection               ║
     ║                                                                   ║
-    ║  Core:     Process | Network | AuthLog | Firewall                 ║
+    ║  Core:     Process | Network | AuthLog | pf Firewall              ║
+    ║  System:   Launch Daemons | Unified Log | TCC Privacy             ║
+    ║  Security: Keychain | Gatekeeper | XProtect                       ║
+    ║                                                                   ║
+    ║     Platform: {plat:<10}  |  AI Analysis: {ai_status:<10}           ║
+    ╚═══════════════════════════════════════════════════════════════════╝
+    """)
+    else:
+        print(f"""
+    ╔═══════════════════════════════════════════════════════════════════╗
+    ║              SentinelAI Linux Agent v2.0                          ║
+    ║          Native Linux Protection & Threat Detection               ║
+    ║                                                                   ║
+    ║  Core:     Process | Network | AuthLog | iptables                 ║
     ║  System:   Cron | SSH Keys | Sudo | Systemd | Packages            ║
     ║  Security: Kernel Modules | LD_PRELOAD | Setuid | Integrity       ║
     ║  Advanced: Container Escape | Auditd | SELinux/AppArmor           ║

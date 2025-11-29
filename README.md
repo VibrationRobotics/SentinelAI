@@ -215,17 +215,17 @@ The desktop app includes:
              ▼                 ▼                 ▼
 ┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
 │   Windows Agent   │ │    Linux Agent    │ │   macOS Agent     │
-│   (25 monitors)   │ │   (16 monitors)   │ │  (run_agent.sh)   │
+│   (25 monitors)   │ │   (16 monitors)   │ │   (10 monitors)   │
 ├───────────────────┤ ├───────────────────┤ ├───────────────────┤
 │ • Process Monitor │ │ • Process Monitor │ │ • Process Monitor │
 │ • Network Monitor │ │ • Network Monitor │ │ • Network Monitor │
-│ • Event Log Parse │ │ • Auth/Sudo Log   │ │ • System Log      │
-│ • Registry Watch  │ │ • Cron Jobs       │ │ • pf firewall     │
-│ • USB/DNS/WMI/DLL │ │ • SSH Keys        │ │ • AI Analysis     │
-│ • Sysmon/ETW/AMSI │ │ • Kernel Modules  │ │                   │
-│                   │ │ • LD_PRELOAD      │ │                   │
-│                   │ │ • Setuid Binaries │ │                   │
-│                   │ │ • Systemd/Packages│ │                   │
+│ • Event Log Parse │ │ • Auth/Sudo Log   │ │ • Unified Log     │
+│ • Registry Watch  │ │ • Cron Jobs       │ │ • pf Firewall     │
+│ • USB/DNS/WMI/DLL │ │ • SSH Keys        │ │ • Launch Daemons  │
+│ • Sysmon/ETW/AMSI │ │ • Kernel Modules  │ │ • Keychain Access │
+│                   │ │ • LD_PRELOAD      │ │ • Gatekeeper      │
+│                   │ │ • Setuid Binaries │ │ • TCC Privacy     │
+│                   │ │ • Systemd/Packages│ │ • XProtect        │
 │                   │ │ • Container Escape│ │                   │
 │                   │ │ • SELinux/AppArmor│ │                   │
 │                   │ │ • File Integrity  │ │                   │
