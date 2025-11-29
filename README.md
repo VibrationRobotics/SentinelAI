@@ -39,13 +39,16 @@ SentinelAI is an intelligent cybersecurity system that provides **real-time thre
 | **Native Agents** | Windows, Linux, and macOS agents for real endpoint protection |
 | **AI Analysis** | GPT-4 powered threat classification and recommendations |
 | **Auto-Response** | Automatically block IPs and terminate malicious processes |
+| **Autonomous Agents** | Agents receive and execute commands from dashboard |
+| **Inbound Monitoring** | Detect port scans, brute force, DDoS on your server |
 | **Real-Time Dashboard** | Beautiful web UI with live threat maps and charts |
+| **Clickable Agent Details** | Full system info (CPU, RAM, disk, network) per agent |
 
 ### Monitoring Capabilities
 | Monitor | Capabilities |
 |---------|-------------|
 | **Process Monitor** | Detects mimikatz, encoded PowerShell, reverse shells, crypto miners |
-| **Network Monitor** | Identifies port scans, brute force, DDoS, suspicious connections |
+| **Network Monitor** | Outbound + Inbound monitoring, port scans, brute force, DDoS |
 | **File Scanner** | YARA rules, hash checking, VirusTotal integration, quarantine |
 | **Log Aggregation** | Windows Event Logs, auth.log, syslog, custom sources |
 | **Firewall Control** | Windows Firewall (netsh), iptables (Linux), pf (macOS) |
@@ -65,6 +68,9 @@ SentinelAI is an intelligent cybersecurity system that provides **real-time thre
 | **Driver Monitor** | Detects rootkit driver loading |
 | **Firewall Rules** | Monitors for unauthorized firewall rule changes |
 | **Certificate Monitor** | Detects rogue certificates in Windows store |
+| **Inbound Monitor** | Detects incoming attacks, port scans, connection floods |
+| **Brute Force Detection** | Tracks failed logins, auto-blocks attackers |
+| **Auto-Block** | Automatically blocks malicious IPs via firewall |
 
 ### Integrations
 | Integration | Description |

@@ -329,7 +329,23 @@ class WindowsAgent:
             
             elif command_type == "scan_path":
                 # Trigger a scan of a specific path
-                result = {"status": "success", "result": f"Scan queued for {target}"}
+                scan_result = self._scan_path(target)
+                result = {"status": "success", "result": scan_result}
+            
+            elif command_type == "get_system_info":
+                # Return current system info
+                sys_info = self._get_system_info()
+                result = {"status": "success", "result": sys_info}
+            
+            elif command_type == "list_connections":
+                # List current network connections
+                connections = self._list_connections()
+                result = {"status": "success", "result": connections}
+            
+            elif command_type == "list_processes":
+                # List running processes
+                processes = self._list_processes()
+                result = {"status": "success", "result": processes}
             
             else:
                 result = {"status": "failed", "error": f"Unknown command type: {command_type}"}
@@ -446,6 +462,109 @@ class WindowsAgent:
             logger.error(f"Error unblocking IP {ip}: {e}")
             return False
     
+    def _scan_path(self, path: str) -> Dict[str, Any]:
+        """Scan a path for suspicious files."""
+        results = {
+            "path": path,
+            "scanned_files": 0,
+            "suspicious_files": [],
+            "errors": []
+        }
+        
+        try:
+            if not os.path.exists(path):
+                results["errors"].append(f"Path not found: {path}")
+                return results
+            
+            # Suspicious file extensions
+            suspicious_extensions = ['.exe', '.dll', '.bat', '.cmd', '.ps1', '.vbs', '.js', '.hta', '.scr']
+            
+            # Scan directory or single file
+            if os.path.isfile(path):
+                files_to_scan = [path]
+            else:
+                files_to_scan = []
+                for root, dirs, files in os.walk(path):
+                    for f in files[:1000]:  # Limit to 1000 files
+                        files_to_scan.append(os.path.join(root, f))
+            
+            for file_path in files_to_scan:
+                try:
+                    results["scanned_files"] += 1
+                    ext = os.path.splitext(file_path)[1].lower()
+                    
+                    # Check for suspicious extensions in unusual locations
+                    if ext in suspicious_extensions:
+                        # Check if in temp or downloads
+                        lower_path = file_path.lower()
+                        if 'temp' in lower_path or 'tmp' in lower_path or 'download' in lower_path:
+                            results["suspicious_files"].append({
+                                "path": file_path,
+                                "reason": f"Executable in suspicious location",
+                                "extension": ext
+                            })
+                except Exception as e:
+                    results["errors"].append(f"Error scanning {file_path}: {str(e)}")
+            
+            logger.info(f"Scan complete: {results['scanned_files']} files, {len(results['suspicious_files'])} suspicious")
+            
+        except Exception as e:
+            results["errors"].append(str(e))
+            logger.error(f"Scan error: {e}")
+        
+        return results
+    
+    def _list_connections(self) -> List[Dict[str, Any]]:
+        """List current network connections."""
+        connections = []
+        try:
+            for conn in psutil.net_connections(kind='inet'):
+                try:
+                    proc_name = "Unknown"
+                    if conn.pid:
+                        try:
+                            proc_name = psutil.Process(conn.pid).name()
+                        except:
+                            pass
+                    
+                    conn_info = {
+                        "status": conn.status,
+                        "local_addr": f"{conn.laddr.ip}:{conn.laddr.port}" if conn.laddr else None,
+                        "remote_addr": f"{conn.raddr.ip}:{conn.raddr.port}" if conn.raddr else None,
+                        "pid": conn.pid,
+                        "process": proc_name
+                    }
+                    connections.append(conn_info)
+                except:
+                    pass
+        except Exception as e:
+            logger.error(f"Error listing connections: {e}")
+        
+        return connections[:100]  # Limit to 100
+    
+    def _list_processes(self) -> List[Dict[str, Any]]:
+        """List running processes."""
+        processes = []
+        try:
+            for proc in psutil.process_iter(['pid', 'name', 'username', 'cpu_percent', 'memory_percent']):
+                try:
+                    info = proc.info
+                    processes.append({
+                        "pid": info['pid'],
+                        "name": info['name'],
+                        "username": info['username'],
+                        "cpu_percent": info['cpu_percent'],
+                        "memory_percent": round(info['memory_percent'], 2) if info['memory_percent'] else 0
+                    })
+                except:
+                    pass
+        except Exception as e:
+            logger.error(f"Error listing processes: {e}")
+        
+        # Sort by CPU usage and return top 50
+        processes.sort(key=lambda x: x.get('cpu_percent', 0) or 0, reverse=True)
+        return processes[:50]
+    
     def _get_windows_version(self) -> str:
         """Get proper Windows version name (Windows 10/11) with build number."""
         try:
@@ -473,8 +592,164 @@ class WindowsAgent:
         except:
             return platform.version()
     
+    def _get_system_info(self) -> Dict[str, Any]:
+        """Gather comprehensive system information for dashboard display."""
+        info = {}
+        
+        try:
+            # CPU info
+            info['cpu'] = {
+                'cores_physical': psutil.cpu_count(logical=False),
+                'cores_logical': psutil.cpu_count(logical=True),
+                'usage_percent': psutil.cpu_percent(interval=0.1),
+                'frequency_mhz': psutil.cpu_freq().current if psutil.cpu_freq() else 0
+            }
+            
+            # Try to get CPU name
+            try:
+                import winreg
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, 
+                    r"HARDWARE\DESCRIPTION\System\CentralProcessor\0")
+                info['cpu']['name'] = winreg.QueryValueEx(key, "ProcessorNameString")[0].strip()
+                winreg.CloseKey(key)
+            except:
+                info['cpu']['name'] = platform.processor()
+            
+            # Memory info
+            mem = psutil.virtual_memory()
+            info['memory'] = {
+                'total_gb': round(mem.total / (1024**3), 2),
+                'available_gb': round(mem.available / (1024**3), 2),
+                'used_gb': round(mem.used / (1024**3), 2),
+                'percent_used': mem.percent
+            }
+            
+            # Disk info
+            disks = []
+            for partition in psutil.disk_partitions():
+                try:
+                    usage = psutil.disk_usage(partition.mountpoint)
+                    disks.append({
+                        'drive': partition.device,
+                        'mountpoint': partition.mountpoint,
+                        'fstype': partition.fstype,
+                        'total_gb': round(usage.total / (1024**3), 2),
+                        'used_gb': round(usage.used / (1024**3), 2),
+                        'free_gb': round(usage.free / (1024**3), 2),
+                        'percent_used': usage.percent
+                    })
+                except:
+                    pass
+            info['disks'] = disks
+            
+            # Network interfaces
+            interfaces = []
+            for iface, addrs in psutil.net_if_addrs().items():
+                iface_info = {'name': iface, 'addresses': []}
+                for addr in addrs:
+                    if addr.family.name == 'AF_INET':
+                        iface_info['addresses'].append({
+                            'type': 'IPv4',
+                            'address': addr.address,
+                            'netmask': addr.netmask
+                        })
+                    elif addr.family.name == 'AF_INET6':
+                        iface_info['addresses'].append({
+                            'type': 'IPv6',
+                            'address': addr.address
+                        })
+                if iface_info['addresses']:
+                    interfaces.append(iface_info)
+            info['network_interfaces'] = interfaces
+            
+            # Get public IP
+            try:
+                public_ip = requests.get('https://api.ipify.org', timeout=3).text
+                info['public_ip'] = public_ip
+                # Store for auto-block whitelist
+                self._own_public_ip = public_ip
+            except:
+                info['public_ip'] = 'Unknown'
+            
+            # Boot time
+            boot_time = datetime.fromtimestamp(psutil.boot_time())
+            uptime = datetime.now() - boot_time
+            info['boot_time'] = boot_time.isoformat()
+            info['uptime_hours'] = round(uptime.total_seconds() / 3600, 1)
+            
+            # Current user
+            info['current_user'] = os.getlogin() if hasattr(os, 'getlogin') else os.environ.get('USERNAME', 'Unknown')
+            
+            # Process count
+            info['process_count'] = len(list(psutil.process_iter()))
+            
+            # Active connections count
+            try:
+                connections = psutil.net_connections(kind='inet')
+                info['connections'] = {
+                    'total': len(connections),
+                    'established': len([c for c in connections if c.status == 'ESTABLISHED']),
+                    'listening': len([c for c in connections if c.status == 'LISTEN'])
+                }
+            except:
+                info['connections'] = {'total': 0, 'established': 0, 'listening': 0}
+            
+            # Installed security software
+            security_software = []
+            try:
+                result = safe_subprocess_run(
+                    ['powershell', '-Command', 
+                     'Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct | Select-Object displayName | ConvertTo-Json'],
+                    timeout=10
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    av_data = json.loads(result.stdout)
+                    if isinstance(av_data, dict):
+                        av_data = [av_data]
+                    for av in av_data:
+                        if av.get('displayName'):
+                            security_software.append(av['displayName'])
+            except:
+                pass
+            info['security_software'] = security_software
+            
+            # Firewall status
+            try:
+                result = safe_subprocess_run(
+                    ['netsh', 'advfirewall', 'show', 'allprofiles', 'state'],
+                    timeout=5
+                )
+                info['firewall_enabled'] = 'ON' in result.stdout.upper() if result.returncode == 0 else False
+            except:
+                info['firewall_enabled'] = False
+            
+            # Listening ports summary
+            listening_ports = []
+            try:
+                for conn in psutil.net_connections(kind='inet'):
+                    if conn.status == 'LISTEN' and conn.laddr:
+                        port = conn.laddr.port
+                        proc_name = 'Unknown'
+                        if conn.pid:
+                            try:
+                                proc_name = psutil.Process(conn.pid).name()
+                            except:
+                                pass
+                        listening_ports.append({'port': port, 'process': proc_name})
+            except:
+                pass
+            info['listening_ports'] = listening_ports[:50]  # Limit to 50
+            
+            # Blocked IPs count
+            info['blocked_ips_count'] = len(self.blocked_ips) if hasattr(self, 'blocked_ips') else 0
+            
+        except Exception as e:
+            logger.debug(f"Error gathering system info: {e}")
+        
+        return info
+    
     def _register_agent(self):
-        """Register this agent with the dashboard."""
+        """Register this agent with the dashboard including full system info."""
         try:
             # Get proper Windows version
             windows_version = self._get_windows_version()
@@ -487,26 +762,31 @@ class WindowsAgent:
                 import ctypes
                 is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
             
+            # Gather comprehensive system info
+            system_info = self._get_system_info()
+            
             data = {
                 'hostname': platform.node(),
                 'platform': platform.system(),
                 'platform_version': windows_version,
-                'agent_version': '1.4.0',
+                'agent_version': '1.5.0',
                 'is_admin': is_admin,
                 'capabilities': [
-                    'process', 'network', 'eventlog', 'firewall', 'ai', 
+                    'process', 'network', 'network_inbound', 'eventlog', 'firewall', 'ai', 
                     'registry', 'startup', 'tasks', 'usb', 'hosts', 'browser',
                     'clipboard', 'dns', 'powershell', 'wmi', 'services',
                     'drivers', 'firewall_rules', 'certificates', 'named_pipes', 'defender',
-                    'amsi', 'etw', 'sysmon', 'dll_injection'
-                ]
+                    'amsi', 'etw', 'sysmon', 'dll_injection', 'brute_force', 'port_scan',
+                    'auto_block', 'command_execution'
+                ],
+                'system_info': system_info
             }
             
             response = requests.post(
                 f"{self.api_base}/windows/agent/register",
                 json=data,
                 headers=self._get_headers(),
-                timeout=5
+                timeout=10
             )
             
             if response.status_code == 200:
@@ -912,8 +1192,8 @@ class WindowsAgent:
         return False, ""
     
     def _network_monitor_loop(self):
-        """Monitor network connections for suspicious activity."""
-        logger.info("Network monitor started")
+        """Monitor network connections for suspicious activity (outbound + inbound)."""
+        logger.info("Network monitor started (outbound + inbound monitoring)")
         
         while self.running:
             try:
@@ -980,15 +1260,334 @@ class WindowsAgent:
                     except Exception:
                         continue
                 
+                # Monitor LISTENING ports and INBOUND connections
+                self._check_inbound_connections(connections)
+                
                 time.sleep(5)
                 
             except Exception as e:
                 logger.error(f"Network monitor error: {e}")
                 time.sleep(10)
     
+    def _check_inbound_connections(self, connections):
+        """Monitor inbound connections - critical for servers hosting services."""
+        # Track connection counts per IP for rate limiting detection
+        if not hasattr(self, '_inbound_tracker'):
+            self._inbound_tracker = {}  # {ip: {'count': n, 'first_seen': time, 'ports': set()}}
+            self._known_listening_ports = set()
+            self._inbound_alerts = set()  # Prevent duplicate alerts
+        
+        current_time = time.time()
+        
+        # Clean old tracking data (older than 5 minutes)
+        old_ips = [ip for ip, data in self._inbound_tracker.items() 
+                   if current_time - data['first_seen'] > 300]
+        for ip in old_ips:
+            del self._inbound_tracker[ip]
+        
+        # Clear old alerts (older than 10 minutes)
+        self._inbound_alerts = {a for a in self._inbound_alerts 
+                                if current_time - a[1] < 600}
+        
+        # Known safe/expected ports for your server
+        expected_server_ports = {
+            80, 443,      # HTTP/HTTPS
+            8000, 8080, 8443, 8015,  # Common app ports
+            3000, 3001, 5000, 5173,  # Dev servers (React, Flask, Vite)
+            22,           # SSH
+            3306, 5432,   # MySQL, PostgreSQL
+            6379,         # Redis
+            27017,        # MongoDB
+        }
+        
+        # Suspicious inbound ports (shouldn't have external connections)
+        dangerous_inbound_ports = {
+            445,    # SMB - ransomware target
+            135, 139,  # RPC/NetBIOS
+            1433, 1434,  # MSSQL
+            3389,   # RDP - brute force target
+            5985, 5986,  # WinRM
+            23,     # Telnet
+            21,     # FTP
+            4444, 5555, 1337, 31337,  # Reverse shell ports
+        }
+        
+        # Track listening ports
+        listening_ports = set()
+        for conn in connections:
+            if conn.status == 'LISTEN' and conn.laddr:
+                listening_ports.add(conn.laddr.port)
+        
+        # Alert on new listening ports (potential backdoor)
+        new_listeners = listening_ports - self._known_listening_ports
+        for port in new_listeners:
+            if port not in expected_server_ports:
+                alert_key = (f"new_listener_{port}", current_time)
+                if not any(k[0] == f"new_listener_{port}" for k in self._inbound_alerts):
+                    # Get process info
+                    proc_name = "Unknown"
+                    for conn in connections:
+                        if conn.status == 'LISTEN' and conn.laddr and conn.laddr.port == port:
+                            if conn.pid:
+                                try:
+                                    proc_name = psutil.Process(conn.pid).name()
+                                except:
+                                    pass
+                            break
+                    
+                    event = SecurityEvent(
+                        timestamp=datetime.utcnow().isoformat(),
+                        event_type='new_listening_port',
+                        severity='MEDIUM',
+                        source='network_inbound',
+                        description=f"New listening port detected: {port} ({proc_name})",
+                        details={
+                            'port': port,
+                            'process': proc_name,
+                            'expected_ports': list(expected_server_ports)
+                        }
+                    )
+                    self._send_event(event)
+                    self._inbound_alerts.add(alert_key)
+                    logger.info(f"New listening port: {port} ({proc_name})")
+        
+        self._known_listening_ports = listening_ports
+        
+        # Check inbound ESTABLISHED connections
+        for conn in connections:
+            if conn.status == 'ESTABLISHED' and conn.laddr and conn.raddr:
+                local_port = conn.laddr.port
+                remote_ip = conn.raddr.ip
+                remote_port = conn.raddr.port
+                
+                # Skip localhost
+                if remote_ip in ['127.0.0.1', '::1', 'localhost']:
+                    continue
+                
+                # Skip private IPs for some checks (but still track)
+                is_private = (remote_ip.startswith('192.168.') or 
+                             remote_ip.startswith('10.') or 
+                             remote_ip.startswith('172.16.') or
+                             remote_ip.startswith('172.17.') or
+                             remote_ip.startswith('172.18.'))
+                
+                # Track this IP
+                if remote_ip not in self._inbound_tracker:
+                    self._inbound_tracker[remote_ip] = {
+                        'count': 0,
+                        'first_seen': current_time,
+                        'ports': set(),
+                        'is_private': is_private
+                    }
+                
+                self._inbound_tracker[remote_ip]['count'] += 1
+                self._inbound_tracker[remote_ip]['ports'].add(local_port)
+                
+                # Check for dangerous inbound ports
+                if local_port in dangerous_inbound_ports:
+                    alert_key = (f"dangerous_inbound_{remote_ip}_{local_port}", current_time)
+                    if not any(k[0] == f"dangerous_inbound_{remote_ip}_{local_port}" for k in self._inbound_alerts):
+                        proc_name = "Unknown"
+                        if conn.pid:
+                            try:
+                                proc_name = psutil.Process(conn.pid).name()
+                            except:
+                                pass
+                        
+                        severity = 'CRITICAL' if local_port in [445, 3389, 4444] else 'HIGH'
+                        
+                        event = SecurityEvent(
+                            timestamp=datetime.utcnow().isoformat(),
+                            event_type='dangerous_inbound_connection',
+                            severity=severity,
+                            source='network_inbound',
+                            description=f"Dangerous inbound connection on port {local_port} from {remote_ip}",
+                            details={
+                                'remote_ip': remote_ip,
+                                'remote_port': remote_port,
+                                'local_port': local_port,
+                                'process': proc_name,
+                                'pid': conn.pid,
+                                'port_service': self._get_port_service(local_port)
+                            },
+                            ip_address=remote_ip
+                        )
+                        self._send_event(event)
+                        self._inbound_alerts.add(alert_key)
+                        logger.warning(f"DANGEROUS INBOUND: {remote_ip} -> port {local_port} ({proc_name})")
+                        
+                        # AUTO-BLOCK dangerous inbound connections from external IPs
+                        if not is_private:
+                            self._auto_block_threat(remote_ip, f"Dangerous port access: {self._get_port_service(local_port)}")
+        
+        # Check for port scanning (10+ ports from same external IP = suspicious)
+        # Note: Many legitimate services (CDNs, cloud apps) use multiple ports
+        for ip, data in self._inbound_tracker.items():
+            # Skip private IPs for port scan detection (internal network is usually OK)
+            if data.get('is_private'):
+                continue
+            
+            # Skip own public IP
+            if hasattr(self, '_own_public_ip') and ip == self._own_public_ip:
+                continue
+            
+            # Skip known cloud providers (they legitimately use many ports)
+            cloud_prefixes = [
+                '35.', '34.', '142.250.', '172.217.',  # Google
+                '104.16.', '104.17.', '104.18.', '104.19.', '104.20.', '104.21.', '104.22.', '104.23.', '104.24.', '104.25.', '104.26.', '104.27.', '104.28.', '104.29.', '104.30.', '104.31.',  # Cloudflare
+                '172.64.', '172.65.', '172.66.', '172.67.',  # Cloudflare
+                '20.', '40.', '52.', '13.', '23.',  # Microsoft Azure
+                '151.101.',  # Fastly
+                '185.199.',  # GitHub
+                '138.68.', '167.172.', '138.197.', '159.65.', '165.22.', '68.183.', '134.209.', '157.245.', '164.90.',  # DigitalOcean
+                '18.', '54.', '52.', '3.',  # AWS
+                '199.232.',  # Fastly/Verizon
+            ]
+            if any(ip.startswith(prefix) for prefix in cloud_prefixes):
+                continue
+                
+            num_ports = len(data['ports'])
+            
+            # 10+ ports = suspicious probing, 20+ = definite scan
+            if num_ports >= 10:
+                alert_key = (f"port_scan_{ip}", current_time)
+                if not any(k[0] == f"port_scan_{ip}" for k in self._inbound_alerts):
+                    severity = 'CRITICAL' if num_ports >= 20 else 'HIGH'
+                    
+                    event = SecurityEvent(
+                        timestamp=datetime.utcnow().isoformat(),
+                        event_type='port_scan_detected',
+                        severity=severity,
+                        source='network_inbound',
+                        description=f"Port scan from {ip} - {num_ports} ports probed (AUTO-BLOCKING)",
+                        details={
+                            'remote_ip': ip,
+                            'ports_scanned': list(data['ports']),
+                            'connection_count': data['count'],
+                            'duration_seconds': current_time - data['first_seen'],
+                            'action': 'auto_blocked'
+                        },
+                        ip_address=ip
+                    )
+                    self._send_event(event)
+                    self._inbound_alerts.add(alert_key)
+                    logger.warning(f"PORT SCAN DETECTED: {ip} scanned {num_ports} ports - AUTO-BLOCKING")
+                    
+                    # AUTO-BLOCK the scanner
+                    self._auto_block_threat(ip, f"Port scan: {num_ports} ports probed")
+        
+        # Check for connection flooding (many connections from same IP)
+        for ip, data in self._inbound_tracker.items():
+            if data.get('is_private'):
+                continue
+                
+            duration = current_time - data['first_seen']
+            if duration > 0 and data['count'] / duration > 5:  # More than 5 conn/sec = flood
+                alert_key = (f"conn_flood_{ip}", current_time)
+                if not any(k[0] == f"conn_flood_{ip}" for k in self._inbound_alerts):
+                    rate = data['count'] / duration
+                    severity = 'CRITICAL' if rate > 20 else 'HIGH'
+                    
+                    event = SecurityEvent(
+                        timestamp=datetime.utcnow().isoformat(),
+                        event_type='connection_flood',
+                        severity=severity,
+                        source='network_inbound',
+                        description=f"Connection flood from {ip} - {data['count']} connections in {duration:.1f}s (AUTO-BLOCKING)",
+                        details={
+                            'remote_ip': ip,
+                            'connection_count': data['count'],
+                            'duration_seconds': duration,
+                            'rate_per_second': rate,
+                            'action': 'auto_blocked'
+                        },
+                        ip_address=ip
+                    )
+                    self._send_event(event)
+                    self._inbound_alerts.add(alert_key)
+                    logger.warning(f"CONNECTION FLOOD: {ip} - {data['count']} connections - AUTO-BLOCKING")
+                    
+                    # AUTO-BLOCK the flooder
+                    self._auto_block_threat(ip, f"Connection flood: {rate:.1f} conn/sec")
+    
+    def _auto_block_threat(self, ip: str, reason: str):
+        """Automatically block a threatening IP address."""
+        try:
+            # Skip if already blocked
+            if ip in self.blocked_ips:
+                return
+            
+            # Skip private IPs
+            if (ip.startswith('192.168.') or ip.startswith('10.') or 
+                ip.startswith('172.16.') or ip.startswith('172.17.') or
+                ip.startswith('127.') or ip == 'localhost'):
+                logger.debug(f"Skipping auto-block for private IP: {ip}")
+                return
+            
+            # Skip our own public IP (get from system_info if available)
+            if hasattr(self, '_own_public_ip') and ip == self._own_public_ip:
+                logger.debug(f"Skipping auto-block for own public IP: {ip}")
+                return
+            
+            # Known safe IPs (Google, Microsoft, Cloudflare, AWS, DigitalOcean, etc.)
+            safe_prefixes = [
+                '35.', '34.', '142.250.', '172.217.',  # Google Cloud/Services
+                '20.', '40.', '52.', '13.', '23.',  # Microsoft Azure
+                '104.16.', '104.17.', '104.18.', '104.19.', '104.20.', '104.21.', '104.22.', '104.23.', '104.24.', '104.25.', '104.26.', '104.27.', '104.28.', '104.29.', '104.30.', '104.31.',  # Cloudflare
+                '172.64.', '172.65.', '172.66.', '172.67.',  # Cloudflare
+                '151.101.',  # Fastly/Reddit
+                '185.199.',  # GitHub
+                '138.68.', '167.172.', '138.197.', '159.65.', '165.22.', '68.183.', '134.209.', '157.245.', '164.90.',  # DigitalOcean
+                '18.', '54.', '3.',  # AWS
+                '199.232.',  # Fastly/Verizon
+            ]
+            if any(ip.startswith(prefix) for prefix in safe_prefixes):
+                logger.debug(f"Skipping auto-block for known safe IP range: {ip}")
+                return
+            
+            # Block the IP
+            success = self.block_ip(ip)
+            
+            if success:
+                logger.warning(f"AUTO-BLOCKED {ip}: {reason}")
+                
+                # Send event about the auto-block
+                event = SecurityEvent(
+                    timestamp=datetime.utcnow().isoformat(),
+                    event_type='auto_block_executed',
+                    severity='HIGH',
+                    source='autonomous_response',
+                    description=f"Automatically blocked {ip}: {reason}",
+                    details={
+                        'blocked_ip': ip,
+                        'reason': reason,
+                        'action': 'firewall_rule_added'
+                    },
+                    ip_address=ip
+                )
+                self._send_event(event)
+            else:
+                logger.error(f"Failed to auto-block {ip}")
+                
+        except Exception as e:
+            logger.error(f"Auto-block error for {ip}: {e}")
+    
+    def _get_port_service(self, port: int) -> str:
+        """Get common service name for a port."""
+        services = {
+            21: 'FTP', 22: 'SSH', 23: 'Telnet', 25: 'SMTP', 53: 'DNS',
+            80: 'HTTP', 110: 'POP3', 135: 'RPC', 139: 'NetBIOS', 143: 'IMAP',
+            443: 'HTTPS', 445: 'SMB', 993: 'IMAPS', 995: 'POP3S',
+            1433: 'MSSQL', 1434: 'MSSQL-UDP', 3306: 'MySQL', 3389: 'RDP',
+            5432: 'PostgreSQL', 5985: 'WinRM-HTTP', 5986: 'WinRM-HTTPS',
+            6379: 'Redis', 8080: 'HTTP-Proxy', 27017: 'MongoDB',
+            4444: 'Metasploit', 5555: 'Android-ADB', 1337: 'Backdoor'
+        }
+        return services.get(port, f'Port-{port}')
+    
     def _event_log_monitor_loop(self):
-        """Monitor Windows Event Logs for security events."""
-        logger.info("Event log monitor started")
+        """Monitor Windows Event Logs for security events with brute force detection."""
+        logger.info("Event log monitor started (with brute force detection)")
         
         # Event IDs to monitor
         security_events = {
@@ -1008,8 +1607,24 @@ class WindowsAgent:
         
         last_check = datetime.now()
         
+        # Brute force tracking
+        failed_logins = {}  # {ip_or_user: {'count': n, 'first_seen': time}}
+        brute_force_alerts = set()  # Prevent duplicate alerts
+        
         while self.running:
             try:
+                current_time = time.time()
+                
+                # Clean old tracking data (older than 10 minutes)
+                old_keys = [k for k, v in failed_logins.items() 
+                           if current_time - v['first_seen'] > 600]
+                for k in old_keys:
+                    del failed_logins[k]
+                
+                # Clear old alerts
+                brute_force_alerts = {a for a in brute_force_alerts 
+                                     if current_time - a[1] < 1800}  # 30 min cooldown
+                
                 # Use PowerShell to query Security event log
                 ps_command = f'''
                 Get-WinEvent -FilterHashtable @{{
@@ -1033,13 +1648,75 @@ class WindowsAgent:
                         
                         for evt in events:
                             event_id = evt.get('Id', 0)
+                            message = evt.get('Message', '') or ''
                             
                             if event_id in security_events:
                                 event_name, severity = security_events[event_id]
                                 
-                                # Escalate failed logons
+                                # Track failed logons for brute force detection
                                 if event_id == 4625:
-                                    # Count recent failures
+                                    # Extract source IP from message
+                                    source_ip = None
+                                    target_user = None
+                                    
+                                    # Parse message for IP and username
+                                    import re
+                                    ip_match = re.search(r'Source Network Address:\s*(\d+\.\d+\.\d+\.\d+)', message)
+                                    user_match = re.search(r'Account Name:\s*(\S+)', message)
+                                    
+                                    if ip_match:
+                                        source_ip = ip_match.group(1)
+                                    if user_match:
+                                        target_user = user_match.group(1)
+                                    
+                                    # Track by IP if available, otherwise by user
+                                    track_key = source_ip or target_user or 'unknown'
+                                    
+                                    if track_key not in failed_logins:
+                                        failed_logins[track_key] = {
+                                            'count': 0,
+                                            'first_seen': current_time,
+                                            'users': set(),
+                                            'ips': set()
+                                        }
+                                    
+                                    failed_logins[track_key]['count'] += 1
+                                    if target_user:
+                                        failed_logins[track_key]['users'].add(target_user)
+                                    if source_ip:
+                                        failed_logins[track_key]['ips'].add(source_ip)
+                                    
+                                    # Check for brute force (5+ failures in tracking window)
+                                    if failed_logins[track_key]['count'] >= 5:
+                                        alert_key = (f"brute_force_{track_key}", current_time)
+                                        if not any(k[0] == f"brute_force_{track_key}" for k in brute_force_alerts):
+                                            severity = 'CRITICAL'
+                                            
+                                            event = SecurityEvent(
+                                                timestamp=datetime.utcnow().isoformat(),
+                                                event_type='brute_force_attack',
+                                                severity=severity,
+                                                source='eventlog',
+                                                description=f"Brute force attack detected: {failed_logins[track_key]['count']} failed logins from {track_key}",
+                                                details={
+                                                    'source': track_key,
+                                                    'failed_count': failed_logins[track_key]['count'],
+                                                    'target_users': list(failed_logins[track_key]['users']),
+                                                    'source_ips': list(failed_logins[track_key]['ips']),
+                                                    'duration_seconds': current_time - failed_logins[track_key]['first_seen']
+                                                },
+                                                ip_address=source_ip
+                                            )
+                                            self._send_event(event)
+                                            brute_force_alerts.add(alert_key)
+                                            logger.warning(f"BRUTE FORCE ATTACK: {failed_logins[track_key]['count']} failed logins from {track_key}")
+                                            
+                                            # AUTO-BLOCK brute force attacker if we have their IP
+                                            if source_ip and not source_ip.startswith('127.'):
+                                                self._auto_block_threat(source_ip, f"Brute force: {failed_logins[track_key]['count']} failed logins")
+                                            
+                                            continue  # Don't send individual failed login event
+                                    
                                     severity = 'HIGH'
                                 
                                 event = SecurityEvent(
@@ -1050,7 +1727,7 @@ class WindowsAgent:
                                     description=f"{event_name} (Event ID: {event_id})",
                                     details={
                                         'event_id': event_id,
-                                        'message': (evt.get('Message', '') or '')[:500]
+                                        'message': message[:500]
                                     }
                                 )
                                 self._send_event(event)
@@ -2769,9 +3446,20 @@ class WindowsAgent:
     # ============== END ADVANCED MONITORS ==============
     
     def block_ip(self, ip: str) -> bool:
-        """Block an IP address using Windows Firewall."""
+        """Block an IP address using Windows Firewall. Requires Administrator privileges."""
         if ip in self.blocked_ips:
             return True
+        
+        # Check if running as admin
+        try:
+            import ctypes
+            is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+        except:
+            is_admin = False
+        
+        if not is_admin:
+            logger.warning(f"Cannot block IP {ip} - Agent not running as Administrator. Run run_agent.bat as Admin to enable auto-blocking.")
+            return False
         
         try:
             rule_name = f"SentinelAI_Block_{ip.replace('.', '_')}"
@@ -2783,14 +3471,15 @@ class WindowsAgent:
                 'action=block',
                 f'remoteip={ip}',
                 'enable=yes'
-            ], capture_output=True, timeout=10)
+            ], timeout=10)
             
             if result.returncode == 0:
                 self.blocked_ips.add(ip)
-                logger.info(f"Blocked IP: {ip}")
+                logger.info(f"✓ BLOCKED IP: {ip} (firewall rule added)")
                 return True
             else:
-                logger.error(f"Failed to block IP {ip}: {result.stderr}")
+                error_msg = result.stderr.strip() if result.stderr else result.stdout.strip() if result.stdout else "Unknown error"
+                logger.error(f"Failed to block IP {ip}: {error_msg}")
                 return False
                 
         except Exception as e:
@@ -2829,20 +3518,38 @@ def main():
     
     ai_status = "DISABLED" if args.no_ai else "ENABLED"
     
+    # Check admin status
+    try:
+        import ctypes
+        is_admin = ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except:
+        is_admin = False
+    
+    admin_status = "ADMIN ✓" if is_admin else "USER (no auto-block)"
+    admin_color = "" if is_admin else "\033[93m"  # Yellow warning if not admin
+    reset_color = "\033[0m" if not is_admin else ""
+    
     print(f"""
     ╔═══════════════════════════════════════════════════════════════════╗
-    ║               SentinelAI Windows Agent v1.4                       ║
-    ║         Native Windows Protection & Threat Detection              ║
+    ║               SentinelAI Windows Agent v1.5                       ║
+    ║       Native Windows Protection & Autonomous Threat Response      ║
     ║                                                                   ║
-    ║  Core:     Process | Network | EventLog | Registry | Firewall     ║
+    ║  Core:     Process | Network (In+Out) | EventLog | Registry       ║
     ║  System:   Startup | Tasks | USB | Hosts | Browser | Services     ║
-    ║  Advanced: Clipboard | DNS | PowerShell | WMI | Drivers           ║
+    ║  Network:  Inbound Monitor | Port Scan | Brute Force | Firewall   ║
     ║  Security: Certificates | Named Pipes | Defender | AVG            ║
-    ║  Deep:     AMSI | ETW | Sysmon | DLL Injection Detection          ║
+    ║  Deep:     AMSI | ETW | Sysmon | DLL Injection | Command Exec     ║
     ║                                                                   ║
-    ║     AI Analysis: {ai_status:^10}    |    25 Active Monitors         ║
+    ║     AI Analysis: {ai_status:^10}    |    26 Active Monitors         ║
+    ║     {admin_color}Privileges: {admin_status:^15}{reset_color}                                   ║
     ╚═══════════════════════════════════════════════════════════════════╝
     """)
+    
+    if not is_admin:
+        print("    ⚠️  WARNING: Not running as Administrator!")
+        print("    ⚠️  Auto-blocking of malicious IPs is DISABLED.")
+        print("    ⚠️  Right-click run_agent.bat → 'Run as administrator' to enable.")
+        print()
     
     agent = WindowsAgent(dashboard_url=args.dashboard)
     agent.use_ai = not args.no_ai

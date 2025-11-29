@@ -16,7 +16,7 @@ from app.services.openai_service import get_openai_service
 from app.services.geolocation_service import enrich_threat_with_location
 from app.services.remediation_service import get_remediation_service
 from app.services.auto_response_service import get_auto_response_service
-from app.db.models import User, ThreatEvent, Agent, AgentCommand
+from app.db.models import User, ThreatEvent, Agent, AgentCommand, SecurityEvent
 from app.api.deps import get_current_user, get_db
 from app.db.base import get_session
 from app.services.audit_service import AuditService, log_threat_detected, log_ai_analysis, log_user_action
@@ -154,6 +154,46 @@ async def analyze_threat(
             db.add(threat_event)
             await db.commit()
             logger.info(f"Threat {threat_id} saved to database")
+            
+            # Also store in SecurityEvent if from an agent
+            if threat_data.agent_source:
+                try:
+                    # Find agent by hostname from payload
+                    hostname = None
+                    if threat_data.payload:
+                        try:
+                            import json
+                            payload_dict = json.loads(threat_data.payload) if isinstance(threat_data.payload, str) else threat_data.payload
+                            hostname = payload_dict.get("hostname")
+                        except:
+                            pass
+                    
+                    if hostname:
+                        agent_result = await db.execute(select(Agent).filter(Agent.hostname == hostname))
+                        agent = agent_result.scalar_one_or_none()
+                        
+                        if agent:
+                            security_event = SecurityEvent(
+                                agent_id=agent.id,
+                                event_type=threat_data.threat_type or "unknown",
+                                severity=severity,
+                                description=description or threat_data.description or f"Event from {threat_data.source_ip}",
+                                details={
+                                    "threat_id": threat_id,
+                                    "ai_analyzed": ai_analysis is not None,
+                                    "confidence": confidence,
+                                    "techniques": techniques,
+                                    "payload": threat_data.payload
+                                },
+                                source_ip=threat_data.source_ip,
+                                is_threat=severity in ["HIGH", "CRITICAL"],
+                                threat_id=threat_id
+                            )
+                            db.add(security_event)
+                            await db.commit()
+                            logger.info(f"SecurityEvent stored for agent {hostname}")
+                except Exception as se_error:
+                    logger.error(f"Failed to store SecurityEvent: {se_error}")
             
             # Audit log: threat detected
             await log_threat_detected(

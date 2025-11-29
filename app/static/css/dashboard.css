@@ -487,3 +487,27 @@ body {
 ::-webkit-scrollbar-thumb:hover {
     background: #555;
 }
+
+/* Agent rows - clickable */
+.agent-row:hover {
+    background-color: #e8f5e9 !important;
+    transition: background-color 0.2s ease;
+}
+
+.agent-row td {
+    vertical-align: middle;
+}
+
+/* Agent details modal */
+#agentDetailsModal .modal-body {
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+#agentDetailsModal .progress {
+    background-color: #e9ecef;
+}
+
+#agentDetailsModal .badge {
+    font-size: 0.75rem;
+}

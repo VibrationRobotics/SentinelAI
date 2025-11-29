@@ -1,4 +1,8 @@
 @echo off
+:: Change to the directory where this batch file is located
+:: This is required when running as Administrator
+cd /d "%~dp0"
+
 echo ============================================
 echo   SentinelAI Windows Agent
 echo ============================================

@@ -71,6 +71,7 @@ class Agent(Base):
     last_seen: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     status: Mapped[str] = mapped_column(String, default="online")  # online, offline, error
     ip_address: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    system_info: Mapped[dict] = mapped_column(JSON, default=dict)  # Full system info (CPU, RAM, disk, etc.)
     
     # Relationships
     events: Mapped[List["SecurityEvent"]] = relationship("SecurityEvent", back_populates="agent")

@@ -469,17 +469,179 @@ const MonitoringDashboard = {
             const adminBadge = agent.is_admin 
                 ? '<span class="badge bg-warning text-dark ms-1" title="Running as Administrator"><i class="bi bi-shield-check"></i> Admin</span>'
                 : '<span class="badge bg-secondary ms-1" title="Not running as Administrator">User</span>';
+            
+            // System summary if available
+            const summary = agent.system_summary || {};
+            const cpuInfo = summary.cpu ? `<small class="text-muted d-block">${summary.cpu.substring(0, 30)}...</small>` : '';
+            const memInfo = summary.memory_gb ? `<small class="text-muted">${summary.memory_gb}GB RAM</small>` : '';
 
             return `
-                <tr>
-                    <td><strong>${agent.hostname}</strong>${adminBadge}</td>
-                    <td><small>${agent.platform_version || agent.platform || 'Unknown'}</small></td>
+                <tr class="agent-row" style="cursor: pointer;" onclick="MonitoringDashboard.showAgentDetails('${agent.hostname}')" title="Click for details">
+                    <td><strong>${agent.hostname}</strong>${adminBadge}${cpuInfo}</td>
+                    <td><small>${agent.platform_version || agent.platform || 'Unknown'}</small><br>${memInfo}</td>
                     <td><span class="badge ${statusClass}">${agent.status}</span></td>
                     <td>${capabilities}</td>
                     <td><small>${lastSeen}</small></td>
                 </tr>
             `;
         }).join('');
+    },
+    
+    /**
+     * Show agent details modal
+     */
+    showAgentDetails: async function(hostname) {
+        try {
+            const response = await fetch(`${this.apiBase}/windows/agent/${hostname}/details`);
+            if (!response.ok) throw new Error('Failed to fetch agent details');
+            
+            const data = await response.json();
+            const agent = data.agent;
+            const sysInfo = data.system_info || {};
+            const events = data.recent_events || [];
+            const blockedIps = data.blocked_ips || [];
+            const stats = data.stats || {};
+            
+            // Build system info HTML
+            const cpu = sysInfo.cpu || {};
+            const memory = sysInfo.memory || {};
+            const connections = sysInfo.connections || {};
+            
+            let disksHtml = '';
+            if (sysInfo.disks && sysInfo.disks.length > 0) {
+                disksHtml = sysInfo.disks.map(d => `
+                    <div class="mb-2">
+                        <strong>${d.drive}</strong> (${d.fstype})<br>
+                        <div class="progress" style="height: 20px;">
+                            <div class="progress-bar ${d.percent_used > 90 ? 'bg-danger' : d.percent_used > 70 ? 'bg-warning' : 'bg-success'}" 
+                                 style="width: ${d.percent_used}%">${d.percent_used}% used</div>
+                        </div>
+                        <small class="text-muted">${d.used_gb}GB / ${d.total_gb}GB</small>
+                    </div>
+                `).join('');
+            }
+            
+            let listeningPortsHtml = '';
+            if (sysInfo.listening_ports && sysInfo.listening_ports.length > 0) {
+                listeningPortsHtml = sysInfo.listening_ports.slice(0, 20).map(p => 
+                    `<span class="badge bg-secondary me-1 mb-1">${p.port} (${p.process})</span>`
+                ).join('');
+            }
+            
+            let eventsHtml = events.slice(0, 10).map(e => `
+                <tr>
+                    <td><span class="badge bg-${e.severity === 'CRITICAL' ? 'danger' : e.severity === 'HIGH' ? 'warning' : 'info'}">${e.severity}</span></td>
+                    <td>${e.event_type}</td>
+                    <td><small>${e.description.substring(0, 50)}...</small></td>
+                    <td><small>${new Date(e.timestamp).toLocaleString()}</small></td>
+                </tr>
+            `).join('');
+            
+            let blockedHtml = blockedIps.map(b => `
+                <tr>
+                    <td><code>${b.ip}</code></td>
+                    <td><small>${b.reason}</small></td>
+                    <td><small>${new Date(b.blocked_at).toLocaleString()}</small></td>
+                </tr>
+            `).join('');
+            
+            const modalHtml = `
+                <div class="modal fade" id="agentDetailsModal" tabindex="-1">
+                    <div class="modal-dialog modal-xl">
+                        <div class="modal-content">
+                            <div class="modal-header bg-success text-white">
+                                <h5 class="modal-title"><i class="bi bi-pc-display me-2"></i>${agent.hostname}</h5>
+                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="row">
+                                    <!-- Left Column: System Info -->
+                                    <div class="col-md-6">
+                                        <h6><i class="bi bi-info-circle me-1"></i>System Information</h6>
+                                        <table class="table table-sm">
+                                            <tr><td><strong>Platform</strong></td><td>${agent.platform_version || agent.platform}</td></tr>
+                                            <tr><td><strong>Agent Version</strong></td><td>${agent.agent_version}</td></tr>
+                                            <tr><td><strong>Status</strong></td><td><span class="badge ${agent.status === 'online' ? 'bg-success' : 'bg-secondary'}">${agent.status}</span></td></tr>
+                                            <tr><td><strong>Admin</strong></td><td>${agent.is_admin ? '<span class="badge bg-warning">Yes</span>' : 'No'}</td></tr>
+                                            <tr><td><strong>Public IP</strong></td><td><code>${sysInfo.public_ip || 'Unknown'}</code></td></tr>
+                                            <tr><td><strong>Uptime</strong></td><td>${sysInfo.uptime_hours ? sysInfo.uptime_hours + ' hours' : 'Unknown'}</td></tr>
+                                            <tr><td><strong>Current User</strong></td><td>${sysInfo.current_user || 'Unknown'}</td></tr>
+                                        </table>
+                                        
+                                        <h6 class="mt-3"><i class="bi bi-cpu me-1"></i>Hardware</h6>
+                                        <table class="table table-sm">
+                                            <tr><td><strong>CPU</strong></td><td>${cpu.name || 'Unknown'}</td></tr>
+                                            <tr><td><strong>Cores</strong></td><td>${cpu.cores_physical || '?'} physical / ${cpu.cores_logical || '?'} logical</td></tr>
+                                            <tr><td><strong>CPU Usage</strong></td><td>
+                                                <div class="progress" style="height: 15px;">
+                                                    <div class="progress-bar" style="width: ${cpu.usage_percent || 0}%">${cpu.usage_percent || 0}%</div>
+                                                </div>
+                                            </td></tr>
+                                            <tr><td><strong>Memory</strong></td><td>${memory.used_gb || '?'}GB / ${memory.total_gb || '?'}GB (${memory.percent_used || 0}%)</td></tr>
+                                        </table>
+                                        
+                                        <h6 class="mt-3"><i class="bi bi-hdd me-1"></i>Disks</h6>
+                                        ${disksHtml || '<p class="text-muted">No disk info available</p>'}
+                                        
+                                        <h6 class="mt-3"><i class="bi bi-shield-check me-1"></i>Security Software</h6>
+                                        ${sysInfo.security_software && sysInfo.security_software.length > 0 
+                                            ? sysInfo.security_software.map(s => `<span class="badge bg-success me-1">${s}</span>`).join('') 
+                                            : '<span class="text-muted">None detected</span>'}
+                                    </div>
+                                    
+                                    <!-- Right Column: Network & Events -->
+                                    <div class="col-md-6">
+                                        <h6><i class="bi bi-hdd-network me-1"></i>Network</h6>
+                                        <table class="table table-sm">
+                                            <tr><td><strong>Connections</strong></td><td>${connections.total || 0} total / ${connections.established || 0} established / ${connections.listening || 0} listening</td></tr>
+                                            <tr><td><strong>Processes</strong></td><td>${sysInfo.process_count || 0}</td></tr>
+                                            <tr><td><strong>Firewall</strong></td><td>${sysInfo.firewall_enabled ? '<span class="badge bg-success">Enabled</span>' : '<span class="badge bg-danger">Disabled</span>'}</td></tr>
+                                        </table>
+                                        
+                                        <h6 class="mt-3"><i class="bi bi-broadcast me-1"></i>Listening Ports</h6>
+                                        <div style="max-height: 100px; overflow-y: auto;">
+                                            ${listeningPortsHtml || '<span class="text-muted">No ports</span>'}
+                                        </div>
+                                        
+                                        <h6 class="mt-3"><i class="bi bi-shield-x me-1"></i>Blocked IPs (${blockedIps.length})</h6>
+                                        <div style="max-height: 150px; overflow-y: auto;">
+                                            <table class="table table-sm">
+                                                ${blockedHtml || '<tr><td colspan="3" class="text-muted">No blocked IPs</td></tr>'}
+                                            </table>
+                                        </div>
+                                        
+                                        <h6 class="mt-3"><i class="bi bi-exclamation-triangle me-1"></i>Recent Events (${stats.total_events || 0})</h6>
+                                        <div style="max-height: 200px; overflow-y: auto;">
+                                            <table class="table table-sm">
+                                                <thead><tr><th>Severity</th><th>Type</th><th>Description</th><th>Time</th></tr></thead>
+                                                <tbody>${eventsHtml || '<tr><td colspan="4" class="text-muted">No recent events</td></tr>'}</tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <span class="text-muted me-auto"><small>Last seen: ${new Date(agent.last_seen).toLocaleString()}</small></span>
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Remove existing modal if any
+            const existingModal = document.getElementById('agentDetailsModal');
+            if (existingModal) existingModal.remove();
+            
+            // Add modal to body and show
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            const modal = new bootstrap.Modal(document.getElementById('agentDetailsModal'));
+            modal.show();
+            
+        } catch (error) {
+            console.error('Error fetching agent details:', error);
+            alert('Failed to load agent details: ' + error.message);
+        }
     },
 
     /**

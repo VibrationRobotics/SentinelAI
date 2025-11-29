@@ -277,6 +277,7 @@ class AgentRegistration(BaseModel):
     agent_version: str
     capabilities: List[str]
     is_admin: Optional[bool] = False
+    system_info: Optional[Dict[str, Any]] = None  # Full system info (CPU, RAM, disk, etc.)
 
 
 @router.post("/agent/register")
@@ -315,6 +316,8 @@ async def register_agent(
             existing_agent.is_admin = registration.is_admin
             existing_agent.last_seen = datetime.utcnow()
             existing_agent.status = "online"
+            if registration.system_info:
+                existing_agent.system_info = registration.system_info
             await db.commit()
             agent_id = existing_agent.id
             logger.info(f"Windows agent updated: {registration.hostname}")
@@ -329,7 +332,8 @@ async def register_agent(
                 is_admin=registration.is_admin,
                 registered_at=datetime.utcnow(),
                 last_seen=datetime.utcnow(),
-                status="online"
+                status="online",
+                system_info=registration.system_info or {}
             )
             db.add(new_agent)
             await db.commit()
@@ -378,7 +382,7 @@ async def list_agents(db: AsyncSession = Depends(get_session)) -> JSONResponse:
         
         agent_list = []
         for agent in agents:
-            agent_list.append({
+            agent_data = {
                 "id": agent.id,
                 "hostname": agent.hostname,
                 "platform": agent.platform,
@@ -390,7 +394,19 @@ async def list_agents(db: AsyncSession = Depends(get_session)) -> JSONResponse:
                 "last_seen": agent.last_seen.isoformat() if agent.last_seen else None,
                 "status": agent.status,
                 "ip_address": agent.ip_address
-            })
+            }
+            # Include summary system info if available
+            if hasattr(agent, 'system_info') and agent.system_info:
+                si = agent.system_info
+                agent_data["system_summary"] = {
+                    "cpu": si.get('cpu', {}).get('name', 'Unknown'),
+                    "memory_gb": si.get('memory', {}).get('total_gb', 0),
+                    "public_ip": si.get('public_ip', 'Unknown'),
+                    "uptime_hours": si.get('uptime_hours', 0),
+                    "process_count": si.get('process_count', 0),
+                    "connections": si.get('connections', {})
+                }
+            agent_list.append(agent_data)
         
         return JSONResponse(
             status_code=status.HTTP_200_OK,
@@ -438,6 +454,92 @@ async def get_agent_status(agent_id: str, db: AsyncSession = Depends(get_session
         )
     except Exception as e:
         logger.error(f"Error getting agent status: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": str(e)}
+        )
+
+
+@router.get("/agent/{agent_id}/details")
+async def get_agent_details(agent_id: str, db: AsyncSession = Depends(get_session)) -> JSONResponse:
+    """Get full details of a specific agent including system info, events, and connections."""
+    try:
+        # Try to find by hostname or id
+        if agent_id.isdigit():
+            result = await db.execute(select(Agent).filter((Agent.hostname == agent_id) | (Agent.id == int(agent_id))))
+        else:
+            result = await db.execute(select(Agent).filter(Agent.hostname == agent_id))
+        agent = result.scalar_one_or_none()
+        
+        if not agent:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content={"error": "Agent not found"}
+            )
+        
+        # Get recent events for this agent
+        events_result = await db.execute(
+            select(SecurityEvent)
+            .filter(SecurityEvent.agent_id == agent.id)
+            .order_by(desc(SecurityEvent.timestamp))
+            .limit(50)
+        )
+        recent_events = events_result.scalars().all()
+        
+        events_list = [{
+            "id": e.id,
+            "event_type": e.event_type,
+            "severity": e.severity,
+            "timestamp": e.timestamp.isoformat() if e.timestamp else None,
+            "description": e.description,
+            "source_ip": e.source_ip,
+            "is_threat": e.is_threat
+        } for e in recent_events]
+        
+        # Get blocked IPs by this agent
+        blocked_result = await db.execute(
+            select(BlockedIP)
+            .filter(BlockedIP.blocked_by == agent.hostname)
+            .order_by(desc(BlockedIP.blocked_at))
+            .limit(20)
+        )
+        blocked_ips = blocked_result.scalars().all()
+        
+        blocked_list = [{
+            "ip": b.ip_address,
+            "reason": b.reason,
+            "blocked_at": b.blocked_at.isoformat() if b.blocked_at else None
+        } for b in blocked_ips]
+        
+        # Build response
+        response = {
+            "agent": {
+                "id": agent.id,
+                "hostname": agent.hostname,
+                "platform": agent.platform,
+                "platform_version": agent.platform_version,
+                "agent_version": agent.agent_version,
+                "capabilities": agent.capabilities,
+                "is_admin": agent.is_admin,
+                "registered_at": agent.registered_at.isoformat() if agent.registered_at else None,
+                "last_seen": agent.last_seen.isoformat() if agent.last_seen else None,
+                "status": agent.status,
+                "ip_address": agent.ip_address
+            },
+            "system_info": agent.system_info if hasattr(agent, 'system_info') else {},
+            "recent_events": events_list,
+            "blocked_ips": blocked_list,
+            "stats": {
+                "total_events": len(events_list),
+                "threats_detected": len([e for e in recent_events if e.is_threat]),
+                "blocked_ips_count": len(blocked_list)
+            }
+        }
+        
+        return JSONResponse(status_code=status.HTTP_200_OK, content=response)
+        
+    except Exception as e:
+        logger.error(f"Error getting agent details: {e}")
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"error": str(e)}
