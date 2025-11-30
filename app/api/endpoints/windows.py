@@ -3,7 +3,7 @@ Windows Integration API endpoints for SentinelAI.
 Provides native Windows firewall and system control.
 Uses PostgreSQL for persistent storage.
 """
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any

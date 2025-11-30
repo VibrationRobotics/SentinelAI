@@ -6,11 +6,9 @@ Query and manage threat intelligence feeds.
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import List, Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_db
-from app.api.auth import get_current_user
-from app.models.user import User
+from app.db.base import get_session
 from app.services.threat_feed_service import (
     ThreatFeedService,
     ThreatFeedConfig,
@@ -43,9 +41,7 @@ class IOCBatchCheckRequest(BaseModel):
 # ==================== ENDPOINTS ====================
 
 @router.get("/stats")
-async def get_feed_stats(
-    current_user: User = Depends(get_current_user)
-):
+async def get_feed_stats():
     """Get current threat feed statistics."""
     service = get_threat_feed_service()
     return service.get_stats()
@@ -54,8 +50,7 @@ async def get_feed_stats(
 @router.post("/update")
 async def update_feeds(
     background_tasks: BackgroundTasks,
-    force: bool = False,
-    current_user: User = Depends(get_current_user)
+    force: bool = False
 ):
     """
     Trigger threat feed update.
@@ -79,8 +74,7 @@ async def update_feeds(
 
 @router.post("/update/sync")
 async def update_feeds_sync(
-    force: bool = False,
-    current_user: User = Depends(get_current_user)
+    force: bool = False
 ):
     """
     Trigger threat feed update and wait for completion.
@@ -95,8 +89,7 @@ async def update_feeds_sync(
 
 @router.post("/check")
 async def check_indicator(
-    request: IOCCheckRequest,
-    current_user: User = Depends(get_current_user)
+    request: IOCCheckRequest
 ):
     """
     Check a single indicator against threat feeds.
@@ -129,8 +122,7 @@ async def check_indicator(
 
 @router.post("/check/batch")
 async def check_indicators_batch(
-    request: IOCBatchCheckRequest,
-    current_user: User = Depends(get_current_user)
+    request: IOCBatchCheckRequest
 ):
     """
     Check multiple indicators against threat feeds.
@@ -162,9 +154,7 @@ async def check_indicators_batch(
 
 
 @router.get("/config")
-async def get_feed_config(
-    current_user: User = Depends(get_current_user)
-):
+async def get_feed_config():
     """Get current threat feed configuration."""
     service = get_threat_feed_service()
     config = service.config
@@ -179,8 +169,7 @@ async def get_feed_config(
 
 @router.post("/config")
 async def update_feed_config(
-    config: ThreatFeedConfigSchema,
-    current_user: User = Depends(get_current_user)
+    config: ThreatFeedConfigSchema
 ):
     """Update threat feed configuration."""
     new_config = ThreatFeedConfig(
@@ -199,8 +188,7 @@ async def update_feed_config(
 
 @router.get("/check/ip/{ip}")
 async def quick_check_ip(
-    ip: str,
-    current_user: User = Depends(get_current_user)
+    ip: str
 ):
     """Quick check if an IP is malicious."""
     service = get_threat_feed_service()
@@ -214,8 +202,7 @@ async def quick_check_ip(
 
 @router.get("/check/domain/{domain}")
 async def quick_check_domain(
-    domain: str,
-    current_user: User = Depends(get_current_user)
+    domain: str
 ):
     """Quick check if a domain is malicious."""
     service = get_threat_feed_service()
@@ -229,8 +216,7 @@ async def quick_check_domain(
 
 @router.get("/check/hash/{file_hash}")
 async def quick_check_hash(
-    file_hash: str,
-    current_user: User = Depends(get_current_user)
+    file_hash: str
 ):
     """Quick check if a file hash is malicious."""
     service = get_threat_feed_service()

@@ -6,11 +6,9 @@ Configure and test Email, Discord, and Webhook notifications.
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_db
-from app.api.auth import get_current_user
-from app.models.user import User
+from app.db.base import get_session
 from app.services.notification_service import (
     NotificationService, 
     NotificationConfig,
@@ -64,9 +62,7 @@ class NotificationResponse(BaseModel):
 # ==================== ENDPOINTS ====================
 
 @router.get("/config")
-async def get_notification_config(
-    current_user: User = Depends(get_current_user)
-):
+async def get_notification_config():
     """Get current notification configuration."""
     service = get_notification_service()
     config = service.config
@@ -97,8 +93,7 @@ async def get_notification_config(
 
 @router.post("/config")
 async def update_notification_config(
-    config: NotificationConfigSchema,
-    current_user: User = Depends(get_current_user)
+    config: NotificationConfigSchema
 ):
     """Update notification configuration."""
     try:
@@ -136,8 +131,7 @@ async def update_notification_config(
 
 @router.post("/test/{channel}")
 async def test_notification(
-    channel: str,
-    current_user: User = Depends(get_current_user)
+    channel: str
 ):
     """
     Test a notification channel.
@@ -176,8 +170,7 @@ async def test_notification(
 
 @router.post("/send")
 async def send_manual_notification(
-    threat_data: dict,
-    current_user: User = Depends(get_current_user)
+    threat_data: dict
 ):
     """
     Manually send a notification for a threat.
@@ -204,8 +197,7 @@ async def send_manual_notification(
 @router.post("/setup/discord")
 async def quick_setup_discord(
     webhook_url: str,
-    min_severity: str = "HIGH",
-    current_user: User = Depends(get_current_user)
+    min_severity: str = "HIGH"
 ):
     """
     Quick setup for Discord notifications.
@@ -250,8 +242,7 @@ async def quick_setup_email(
     smtp_port: int = 587,
     smtp_user: str = "",
     smtp_password: str = "",
-    min_severity: str = "HIGH",
-    current_user: User = Depends(get_current_user)
+    min_severity: str = "HIGH"
 ):
     """
     Quick setup for Email notifications.
