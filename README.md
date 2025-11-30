@@ -80,12 +80,30 @@ SentinelAI is an intelligent cybersecurity system that provides **real-time thre
 |-------------|-------------|
 | **OpenAI GPT-4** | Intelligent threat analysis and remediation suggestions |
 | **VirusTotal** | Hash, URL, IP, and domain reputation lookups |
+| **AlienVault OTX** | Threat intelligence feed integration |
+| **Abuse.ch Feeds** | URLhaus, FeodoTracker, ThreatFox, MalwareBazaar |
 | **AbuseIPDB** | IP reputation checking for attackers (optional) |
 | **AVG Antivirus** | Parse AVG/Avast logs for threat detections |
 | **Windows Defender** | Integration with Windows Security Center |
 | **Snort IDS** | Ingest alerts from Snort intrusion detection system |
 | **Docker Projects** | Connect any Docker container for centralized monitoring |
 | **REST API** | Full API for custom integrations and automation |
+
+### Notifications & Alerts
+| Channel | Description |
+|---------|-------------|
+| **Email Alerts** | SMTP email notifications for HIGH/CRITICAL threats |
+| **Discord Webhooks** | Rich embed alerts to Discord channels |
+| **Generic Webhooks** | POST alerts to any endpoint with HMAC signatures |
+| **Configurable Thresholds** | Set minimum severity for notifications |
+
+### Advanced Protection
+| Feature | Description |
+|---------|-------------|
+| **Ransomware Canary** | Honeypot files detect encryption attempts |
+| **Data Exfiltration Detection** | Alert on large outbound transfers (50MB/min threshold) |
+| **Fleet Management** | Overview dashboard for 100+ agents |
+| **Threat Feed Lookup** | Check IPs, domains, hashes against threat intelligence |
 
 ### Advanced ML v2.0 Threat Detection
 | Feature | Description |
@@ -524,6 +542,60 @@ PUT /api/v1/settings/admin/users/{id}/tier?tier=pro
 
 # Enable/disable user
 PUT /api/v1/settings/admin/users/{id}/status?is_active=false
+```
+
+### Notification Endpoints
+```http
+# Setup Discord notifications
+POST /api/v1/notifications/setup/discord
+{"webhook_url": "https://discord.com/api/webhooks/..."}
+
+# Setup Email notifications
+POST /api/v1/notifications/setup/email
+{"recipients": ["admin@example.com"], "smtp_host": "smtp.gmail.com", "smtp_user": "...", "smtp_password": "..."}
+
+# Test notification channel
+POST /api/v1/notifications/test/discord
+POST /api/v1/notifications/test/email
+POST /api/v1/notifications/test/webhook
+
+# Get/update notification config
+GET /api/v1/notifications/config
+POST /api/v1/notifications/config
+```
+
+### Threat Feed Endpoints
+```http
+# Update threat feeds (Abuse.ch, OTX)
+POST /api/v1/threat-feeds/update
+
+# Check single indicator
+POST /api/v1/threat-feeds/check
+{"indicator": "1.2.3.4", "indicator_type": "auto"}
+
+# Batch check indicators
+POST /api/v1/threat-feeds/check/batch
+{"indicators": ["1.2.3.4", "evil.com", "abc123..."]}
+
+# Quick checks
+GET /api/v1/threat-feeds/check/ip/{ip}
+GET /api/v1/threat-feeds/check/domain/{domain}
+GET /api/v1/threat-feeds/check/hash/{hash}
+
+# Get feed stats
+GET /api/v1/threat-feeds/stats
+```
+
+### Fleet Management Endpoints
+```http
+# Get fleet overview (for 100+ agents)
+GET /api/v1/agents/fleet-overview
+
+# List all agents
+GET /api/v1/agents/
+
+# Get agent stats
+GET /api/v1/agents/stats
 ```
 
 Full API documentation available at:

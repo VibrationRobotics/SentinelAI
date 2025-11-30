@@ -11,6 +11,8 @@ Native Windows agent for **real-time threat detection and autonomous protection*
 - **Advanced ML v2.0**: 150+ feature extraction, ensemble models, behavioral analysis
 - **MITRE ATT&CK**: Maps detections to 45+ techniques
 - **Autonomous Learning**: Model improves over time from real-world data
+- **Ransomware Canary**: Honeypot files detect encryption attempts instantly
+- **Data Exfiltration Detection**: Alerts on large outbound transfers (50MB/min threshold)
 - **Reports to Dashboard**: All events appear in the Docker dashboard in real-time
 
 ## 🚀 Quick Start
@@ -114,6 +116,8 @@ The ML model **improves over time**:
 ### Example Output
 ```
 2025-11-29 - SentinelAgent - INFO - Advanced ML v2.0: Enabled
+2025-11-29 - SentinelAgent - INFO - Ransomware canary deployed: 10 files
+2025-11-29 - SentinelAgent - INFO - Data exfiltration detector initialized
 2025-11-29 - SentinelAgent - INFO - Autonomous ML learning enabled - model will improve over time
 2025-11-29 - SentinelAgent - WARNING - THREAT DETECTED [ML]: mimikatz.exe - CRITICAL (conf: 0.92)
 2025-11-29 - SentinelAgent - INFO - MITRE: T1003.001 (LSASS Memory), T1003.002 (SAM Database)

@@ -218,6 +218,54 @@ class UserSettings(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class NotificationConfig(Base):
+    """Notification configuration for alerts"""
+    __tablename__ = "notification_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), unique=True)
+    
+    # Email settings
+    email_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    email_recipients: Mapped[str] = mapped_column(String, default="")  # Comma-separated
+    smtp_host: Mapped[str] = mapped_column(String, default="smtp.gmail.com")
+    smtp_port: Mapped[int] = mapped_column(Integer, default=587)
+    smtp_user: Mapped[str] = mapped_column(String, default="")
+    smtp_password: Mapped[str] = mapped_column(String, default="")  # Encrypted
+    smtp_from: Mapped[str] = mapped_column(String, default="")
+    smtp_tls: Mapped[bool] = mapped_column(Boolean, default=True)
+    
+    # Discord settings
+    discord_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    discord_webhook_url: Mapped[str] = mapped_column(String, default="")
+    
+    # Generic webhook settings
+    webhook_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    webhook_urls: Mapped[str] = mapped_column(String, default="")  # Comma-separated
+    webhook_secret: Mapped[str] = mapped_column(String, default="")
+    
+    # Alert threshold
+    min_severity: Mapped[str] = mapped_column(String, default="HIGH")  # INFO, LOW, MEDIUM, HIGH, CRITICAL
+    
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ThreatFeedCache(Base):
+    """Cached threat intelligence indicators"""
+    __tablename__ = "threat_feed_cache"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    indicator_type: Mapped[str] = mapped_column(String, index=True)  # ip, domain, url, hash
+    indicator_value: Mapped[str] = mapped_column(String, index=True, unique=True)
+    source: Mapped[str] = mapped_column(String)  # otx, abusech, feodo
+    threat_type: Mapped[str] = mapped_column(String)  # malware, c2, phishing
+    confidence: Mapped[float] = mapped_column(Float, default=0.8)
+    details: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    first_seen: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_seen: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 class AgentCommand(Base):
     """Commands queued for agents to execute (autonomous response)"""
     __tablename__ = "agent_commands"
