@@ -20,6 +20,7 @@ from app.db.models import User, ThreatEvent, Agent, AgentCommand, SecurityEvent
 from app.api.deps import get_current_user, get_db
 from app.db.base import get_session
 from app.services.audit_service import AuditService, log_threat_detected, log_ai_analysis, log_user_action
+from app.services.notification_service import get_notification_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -254,6 +255,28 @@ async def analyze_threat(
                         logger.error(f"Failed to queue agent commands: {cmd_error}")
         except Exception as ar_error:
             logger.error(f"Auto-response evaluation error: {ar_error}")
+        
+        # Send notifications for HIGH/CRITICAL threats
+        notification_result = None
+        try:
+            if severity in ["HIGH", "CRITICAL"]:
+                notification_service = get_notification_service()
+                notification_data = {
+                    "severity": severity,
+                    "threat_type": threat_type,
+                    "description": description or f"Threat detected from {threat_data.source_ip}",
+                    "hostname": analyzed_threat.get("hostname", "Unknown"),
+                    "source_ip": threat_data.source_ip,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "mitre_techniques": techniques,
+                    "confidence": confidence,
+                    "ai_analysis": {"summary": recommendation} if ai_analysis else None
+                }
+                notification_result = await notification_service.notify_threat(notification_data)
+                if any(notification_result.values()):
+                    logger.info(f"Notifications sent for threat {threat_id}: {notification_result}")
+        except Exception as notif_error:
+            logger.error(f"Notification error: {notif_error}")
         
         # Return the response
         return JSONResponse(

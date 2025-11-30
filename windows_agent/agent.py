@@ -57,6 +57,19 @@ try:
 except ImportError:
     ADVANCED_ML_AVAILABLE = False
 
+# Import ransomware canary and exfiltration detection
+try:
+    from ransomware_canary import RansomwareCanaryMonitor, create_canary_monitor
+    CANARY_AVAILABLE = True
+except ImportError:
+    CANARY_AVAILABLE = False
+
+try:
+    from exfiltration_detector import DataExfiltrationDetector, create_exfiltration_detector
+    EXFILTRATION_AVAILABLE = True
+except ImportError:
+    EXFILTRATION_AVAILABLE = False
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -196,10 +209,30 @@ class WindowsAgent:
             except Exception as e:
                 logger.warning(f"Could not initialize Advanced ML: {e}")
         
+        # Ransomware canary monitor
+        self.canary_monitor = None
+        if CANARY_AVAILABLE:
+            try:
+                self.canary_monitor = create_canary_monitor(callback=self._on_ransomware_alert)
+                logger.info(f"Ransomware canary deployed: {len(self.canary_monitor.canary_files)} files")
+            except Exception as e:
+                logger.warning(f"Could not initialize canary monitor: {e}")
+        
+        # Data exfiltration detector
+        self.exfiltration_detector = None
+        if EXFILTRATION_AVAILABLE:
+            try:
+                self.exfiltration_detector = create_exfiltration_detector(callback=self._on_exfiltration_alert)
+                logger.info("Data exfiltration detector initialized")
+            except Exception as e:
+                logger.warning(f"Could not initialize exfiltration detector: {e}")
+        
         logger.info(f"Windows Agent initialized - Dashboard: {self.dashboard_url}")
         logger.info(f"AI-powered analysis: {'Enabled' if self.use_ai else 'Disabled'}")
         logger.info(f"Advanced ML v2.0: {'Enabled' if self.advanced_detector else 'Disabled'}")
         logger.info(f"Legacy ML detector: {'Enabled' if self.hybrid_detector else 'Disabled'}")
+        logger.info(f"Ransomware canary: {'Enabled' if self.canary_monitor else 'Disabled'}")
+        logger.info(f"Exfiltration detection: {'Enabled' if self.exfiltration_detector else 'Disabled'}")
     
     def _get_headers(self) -> Dict[str, str]:
         """Get HTTP headers including API key if configured."""
@@ -220,6 +253,50 @@ class WindowsAgent:
         except Exception as e:
             logger.debug(f"API request failed: {e}")
             return None
+    
+    def _on_ransomware_alert(self, alert_data: Dict):
+        """Callback when ransomware canary is triggered."""
+        logger.critical(f"RANSOMWARE DETECTED: {alert_data.get('description', 'Unknown')}")
+        
+        # Create security event
+        event = SecurityEvent(
+            timestamp=datetime.utcnow().isoformat(),
+            event_type="RANSOMWARE_DETECTED",
+            severity="CRITICAL",
+            source="canary",
+            description=alert_data.get('description', 'Ransomware activity detected via canary file'),
+            details={
+                "canary_path": alert_data.get('canary_path'),
+                "ransomware_extension": alert_data.get('ransomware_extension'),
+                "alert_type": alert_data.get('type'),
+                "mitre_techniques": ["T1486"]  # Data Encrypted for Impact
+            },
+            ip_address="127.0.0.1"
+        )
+        self.event_queue.put(event)
+    
+    def _on_exfiltration_alert(self, alert_data: Dict):
+        """Callback when data exfiltration is detected."""
+        logger.warning(f"EXFILTRATION ALERT: {alert_data.get('description', 'Unknown')}")
+        
+        # Create security event
+        event = SecurityEvent(
+            timestamp=datetime.utcnow().isoformat(),
+            event_type="DATA_EXFILTRATION",
+            severity=alert_data.get('severity', 'HIGH'),
+            source="exfiltration",
+            description=alert_data.get('description', 'Potential data exfiltration detected'),
+            details={
+                "process_name": alert_data.get('process_name'),
+                "pid": alert_data.get('pid'),
+                "remote_ip": alert_data.get('remote_ip'),
+                "bytes_sent": alert_data.get('bytes_sent'),
+                "transfer_rate_mbps": alert_data.get('transfer_rate_mbps'),
+                "mitre_techniques": ["T1041"]  # Exfiltration Over C2 Channel
+            },
+            ip_address=alert_data.get('remote_ip', '127.0.0.1')
+        )
+        self.event_queue.put(event)
     
     def start(self):
         """Start the Windows agent."""
@@ -281,6 +358,22 @@ class WindowsAgent:
             except Exception as e:
                 logger.warning(f"Could not start autonomous learning: {e}")
         
+        # Start ransomware canary monitoring
+        if self.canary_monitor:
+            try:
+                self.canary_monitor.start_monitoring()
+                logger.info("Ransomware canary monitoring started")
+            except Exception as e:
+                logger.warning(f"Could not start canary monitoring: {e}")
+        
+        # Start exfiltration detection
+        if self.exfiltration_detector:
+            try:
+                self.exfiltration_detector.start_monitoring()
+                logger.info("Data exfiltration monitoring started")
+            except Exception as e:
+                logger.warning(f"Could not start exfiltration monitoring: {e}")
+        
         # Main loop
         try:
             while self.running:
@@ -297,6 +390,21 @@ class WindowsAgent:
                     logger.info("ML state saved")
                 except Exception as e:
                     logger.warning(f"Error saving ML state: {e}")
+            
+            # Stop canary monitoring and cleanup
+            if self.canary_monitor:
+                try:
+                    self.canary_monitor.cleanup()
+                    logger.info("Canary files cleaned up")
+                except Exception as e:
+                    logger.warning(f"Error cleaning up canaries: {e}")
+            
+            # Stop exfiltration monitoring
+            if self.exfiltration_detector:
+                try:
+                    self.exfiltration_detector.stop_monitoring()
+                except Exception as e:
+                    logger.warning(f"Error stopping exfiltration monitor: {e}")
     
     def _heartbeat_loop(self):
         """Send periodic heartbeat to dashboard and poll for commands."""

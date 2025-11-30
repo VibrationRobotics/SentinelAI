@@ -7,6 +7,7 @@ from app.core.config import settings
 # Gradually add routers one by one to isolate any issues
 from app.api.endpoints import auth, incidents, analysis, threats, ai, auto_response, monitoring, logs, windows, audit, agents, virustotal
 from app.api.endpoints import settings as user_settings
+from app.api import notifications, threat_feeds
 from app.db.base import Base, engine
 import logging
 from datetime import datetime
@@ -62,6 +63,8 @@ api_router.include_router(audit.router, prefix="/audit", tags=["audit"])
 api_router.include_router(agents.router, prefix="/agents", tags=["agents"])
 api_router.include_router(user_settings.router, prefix="/settings", tags=["settings"])
 api_router.include_router(virustotal.router, prefix="/virustotal", tags=["virustotal"])
+api_router.include_router(notifications.router, tags=["notifications"])
+api_router.include_router(threat_feeds.router, tags=["threat-feeds"])
 
 # Add proxy endpoint to forward requests to the API
 @app.get("/api/proxy/threats/recent")

@@ -105,6 +105,49 @@ class UsageStatsResponse(BaseModel):
     threats_detected_today: int
 
 
+class FleetAgentSummary(BaseModel):
+    id: int
+    hostname: str
+    platform: str
+    status: str
+    last_seen: datetime
+    ip_address: Optional[str]
+    events_today: int = 0
+    threats_today: int = 0
+    critical_threats: int = 0
+    health_score: int = 100  # 0-100
+
+    class Config:
+        from_attributes = True
+
+
+class FleetOverviewResponse(BaseModel):
+    total_agents: int
+    online_agents: int
+    offline_agents: int
+    warning_agents: int
+    
+    # Platform breakdown
+    windows_agents: int
+    linux_agents: int
+    macos_agents: int
+    
+    # Threat summary
+    total_events_today: int
+    total_threats_today: int
+    critical_threats_today: int
+    high_threats_today: int
+    
+    # Top threats
+    top_threat_types: List[dict]
+    
+    # Agent list with summary
+    agents: List[FleetAgentSummary]
+    
+    # Timestamp
+    generated_at: datetime
+
+
 # ============== Usage Analytics (must be before /{agent_id}) ==============
 
 @router.get("/stats", response_model=UsageStatsResponse)
@@ -159,6 +202,145 @@ async def get_usage_stats(db: AsyncSession = Depends(get_db)):
         events_this_week=events_this_week,
         ai_analyses_today=ai_analyses,
         threats_detected_today=threats_today
+    )
+
+
+@router.get("/fleet-overview", response_model=FleetOverviewResponse)
+async def get_fleet_overview(db: AsyncSession = Depends(get_db)):
+    """
+    Get comprehensive fleet overview for managing 100+ agents.
+    Includes agent health, threat summary, and platform breakdown.
+    """
+    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    five_minutes_ago = datetime.utcnow() - timedelta(minutes=5)
+    
+    # Get all agents
+    result = await db.execute(select(Agent).order_by(Agent.last_seen.desc()))
+    agents = result.scalars().all()
+    
+    # Initialize counters
+    total_agents = len(agents)
+    online_agents = 0
+    offline_agents = 0
+    warning_agents = 0
+    windows_agents = 0
+    linux_agents = 0
+    macos_agents = 0
+    
+    total_events_today = 0
+    total_threats_today = 0
+    critical_threats_today = 0
+    high_threats_today = 0
+    
+    threat_type_counts = {}
+    agent_summaries = []
+    
+    for agent in agents:
+        # Determine status
+        if agent.last_seen >= five_minutes_ago:
+            status = "online"
+            online_agents += 1
+        elif agent.last_seen >= today:
+            status = "warning"
+            warning_agents += 1
+        else:
+            status = "offline"
+            offline_agents += 1
+        
+        # Platform count
+        platform_lower = (agent.platform or "").lower()
+        if "windows" in platform_lower:
+            windows_agents += 1
+        elif "linux" in platform_lower:
+            linux_agents += 1
+        elif "darwin" in platform_lower or "macos" in platform_lower:
+            macos_agents += 1
+        
+        # Get events for this agent today
+        events_query = select(func.count(SecurityEvent.id)).where(
+            SecurityEvent.agent_id == agent.id,
+            SecurityEvent.timestamp >= today
+        )
+        events_result = await db.execute(events_query)
+        agent_events_today = events_result.scalar() or 0
+        total_events_today += agent_events_today
+        
+        # Get threats for this agent today
+        threats_query = select(SecurityEvent).where(
+            SecurityEvent.agent_id == agent.id,
+            SecurityEvent.timestamp >= today,
+            SecurityEvent.is_threat == True
+        )
+        threats_result = await db.execute(threats_query)
+        agent_threats = threats_result.scalars().all()
+        
+        agent_threats_today = len(agent_threats)
+        agent_critical = 0
+        
+        for threat in agent_threats:
+            total_threats_today += 1
+            
+            # Count by severity
+            severity = (threat.severity or "").upper()
+            if severity == "CRITICAL":
+                critical_threats_today += 1
+                agent_critical += 1
+            elif severity == "HIGH":
+                high_threats_today += 1
+            
+            # Count by type
+            threat_type = threat.event_type or "unknown"
+            threat_type_counts[threat_type] = threat_type_counts.get(threat_type, 0) + 1
+        
+        # Calculate health score (100 = perfect, lower = more issues)
+        health_score = 100
+        if status == "offline":
+            health_score -= 50
+        elif status == "warning":
+            health_score -= 20
+        if agent_critical > 0:
+            health_score -= min(30, agent_critical * 10)
+        if agent_threats_today > 10:
+            health_score -= 10
+        health_score = max(0, health_score)
+        
+        agent_summaries.append(FleetAgentSummary(
+            id=agent.id,
+            hostname=agent.hostname,
+            platform=agent.platform or "unknown",
+            status=status,
+            last_seen=agent.last_seen,
+            ip_address=agent.ip_address,
+            events_today=agent_events_today,
+            threats_today=agent_threats_today,
+            critical_threats=agent_critical,
+            health_score=health_score
+        ))
+    
+    # Sort agents: critical first, then by health score
+    agent_summaries.sort(key=lambda a: (a.critical_threats * -1000, a.health_score))
+    
+    # Top threat types
+    top_threat_types = [
+        {"type": k, "count": v}
+        for k, v in sorted(threat_type_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+    ]
+    
+    return FleetOverviewResponse(
+        total_agents=total_agents,
+        online_agents=online_agents,
+        offline_agents=offline_agents,
+        warning_agents=warning_agents,
+        windows_agents=windows_agents,
+        linux_agents=linux_agents,
+        macos_agents=macos_agents,
+        total_events_today=total_events_today,
+        total_threats_today=total_threats_today,
+        critical_threats_today=critical_threats_today,
+        high_threats_today=high_threats_today,
+        top_threat_types=top_threat_types,
+        agents=agent_summaries,
+        generated_at=datetime.utcnow()
     )
 
 
